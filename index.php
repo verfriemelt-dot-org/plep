@@ -408,86 +408,216 @@
 
         }
     
-    $cli = new Console(  );
+    class KeyMapper {
+      
+        public function consume( $handle ) {
+            getLastKey();
+        }
+    }
     
+    class Debugger {
+      
+        public function __construct() {
+          
+        }
+      
+    }
+
+    // setup application
+    $cli = new Console();
     $cli->cls();
-    
-    $cli->jump(0,0);
-    $cli->write('hi');
-    
-    sleep(0.5);
 
-    
-    
-   $pg = \pg_connect( 'host=localhost port=6666 dbname=docker user=docker password=docker' );
-   pg_set_error_verbosity( $pg, \PGSQL_ERRORS_DEFAULT );
+    $pg = \pg_connect( 'host=localhost port=6666 dbname=docker user=docker password=docker' );
+    pg_set_error_verbosity( $pg, \PGSQL_ERRORS_DEFAULT );
 
 
-   $res = pg_query("select oid , proname , prosrc from pg_proc where proname = 'resource_timeline__termination_search'");
-   $data = pg_fetch_assoc($res);
-   
-   $src = explode( "\n",$data['prosrc']);
-   
-   for ( $line = 0; $line < $cli->getHeight(); $line++ ) {
+    $res = pg_query("select oid , proname , prosrc from pg_proc where proname = 'resource_timeline__termination_search'");
+    $data = pg_fetch_assoc($res);
+
+    $src = explode( "\n",$data['prosrc']);
+
+
+    // todo
+    // save old settings with
+    // stty -g < /dev/tty
+    // restore later with stty $old < /dev/tty
+    system('stty -echo -icanon min 1 time 0 < /dev/tty');
+    $stdin = fopen('php://stdin', 'r');
+    stream_set_blocking($stdin, 0);
+
+    $targetFps = 30;
+
+    pcntl_async_signals(true);
     
-      $cli->jump(0, $line );
-      
-      $cli->write( str_pad( $line, 4,' ', \STR_PAD_LEFT ) . ": " . $src[$line]);
+    pcntl_signal(
+        SIGWINCH,
+        function () use ($cli): void {
+            $cli->updateDimensions();
+            $cli->cls();
+        }
+    );
     
-   }
-   
-   // todo
-   // save old settings with
-   // stty -g < /dev/tty
-   // restore later with stty $old < /dev/tty
-   system('stty -echo -icanon min 1 time 0 < /dev/tty');
-   $stdin = fopen('php://stdin', 'r');
-   stream_set_blocking($stdin, 0);
-   
-   $targetFps = 30;
-   
-   pcntl_async_signals(true);
-   pcntl_signal(
-       SIGWINCH,
-       function () use ($cli): void {
-           $cli->updateDimensions();
-           $cli->cls();
-       }
-   );
-   
-   while( true ) {
+    $oid = 44556;
+    $channel = pg_fetch_assoc(pg_query('select pldbg_create_listener()'))['pldbg_create_listener'];
+    pg_query("select pldbg_set_global_breakpoint({$channel},{$oid},null,null)");
+
+    $async_result = pg_send_query($pg, "select pldbg_wait_for_target({$channel})");
     
-    $start = microtime(1);
+    $result = [];
+    $source = [];
+    $vars   = [];
     
-    $press = ord(fgetc($stdin));
-    
-    if ( $press ) {
-      $cli->cls();
-      
-      $cli->jump( floor($cli->getWidth() / 2 ), floor( $cli->getHeight() / 2) );
-      $cli->write( $press );
-      
+    $attached = false;
+    $initialized = false;
+
+    while( true ) {
+
+        $start = microtime(1);
+        $key = '';
+        $keyCode = ord(fgetc($stdin));
+        
+        if ( !pg_connection_busy($pg) && !$initialized ) {
+          
+            // clear results from connection
+            pg_get_result( $pg );
+            $attached = true;
+            
+            // fetch source
+            
+            $result = pg_fetch_all(pg_query("select * from pldbg_get_stack({$channel})"))[0];
+
+            
+            $source = explode("\n",pg_fetch_assoc(pg_query("select * from pldbg_get_source({$channel}, {$oid})"))['pldbg_get_source']);
+            $vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$channel})"));
+            $initialized = true;
+        }
+        
+        $cli->jump(0,10);
+        $cli->write( $key );  
+        
+        if ( !$attached ) {
+          $cli->jump(0,0);
+          $cli->write( 'waiting');  
+        } else {
+          $cli->jump(0,0);
+          $cli->write( 'connected');  
+        }
+        
+        if ( $keyCode ) {
+          
+          
+          switch ( $keyCode ) {
+            // fkeys
+            case 113: $key = 'q'; die(); break;
+            case 27:
+              $next = ord(fgetc($stdin));
+              
+              if ( 
+                   $next              === 91 
+                && ord(fgetc($stdin)) === 49
+                && ord(fgetc($stdin)) === 53
+                && ord(fgetc($stdin)) === 126
+              ) {
+                $key = 'F5';
+              } elseif (
+                   $next              === 79 
+                && ord(fgetc($stdin)) === 83
+              ) {
+                $key = 'F4';
+                
+              }
+              break;
+            
+          }
+          
+        }
+        
+        switch ( $key ) {
+          case 'q': 
+          
+            // if ( !pg_connection_busy($pg) ) {
+            //     pg_query("SELECT pldbg_abort_target({$channel})"); 
+                
+            // }
+            
+            // pg_close( $pg );
+            
+            exit;
+          case 'F4':
+             $result = pg_fetch_assoc(pg_query("select linenumber from pldbg_step_into({$channel})"));
+             $result = pg_fetch_all(pg_query("select * from pldbg_get_stack({$channel})"))[0];
+             $vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$channel})"));
+             
+             // $cli->cls();
+             // var_dump( $vars ); die();
+             
+             
+        }
+
+        // $cli->cls();
+        $cli->jump( 0,3 );
+        $cli->write( "Line: " .  ($result['linenumber'] ?? '') );
+        
+        if ( $source ) {
+          
+          $offset = 5;
+          
+          for ( $line = 0; $line < $cli->getHeight() - $offset && $line < count($source); $line++ ) {
+
+              $cli->jump(0, $line + $offset );
+              
+              if ( isset($result['linenumber']) && ( $line + 1 ) == $result['linenumber'] ) {
+                $cli->write( str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line], Console::STYLE_BLUE);
+              } else {
+                $cli->write( str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line]);
+              }
+              
+
+          }
+          
+          // vars
+          
+          $cli->jump( $cli->getWidth() - 80 , $offset  - 1);
+          $cli->write( str_pad ( 'name', 20) );
+          $cli->write( str_pad ( 'dtype', 10) );
+          $cli->write( str_pad ( 'value', 10) );
+          $cli->write( str_pad ( 'class', 6 ));
+          $cli->write( str_pad ( 'line', 6 ));
+          $cli->write( str_pad ( 'unique', 8 ));
+          $cli->write( str_pad ( 'const', 8 ));
+          $cli->write( str_pad ( 'notnull', 8 ));
+          
+          foreach( $vars as $var ) {
+              
+            $cli->jump( $cli->getWidth() - 80, $offset );
+            $cli->write( str_pad ( $var['name'], 20) );
+            $cli->write( str_pad ( $var['dtype'], 10) );
+            $cli->write( str_pad ( $var['value'], 10) );
+            $cli->write( str_pad ( $var['varclass'], 6 ));
+            $cli->write( str_pad ( $var['linenumber'], 6 ));
+            $cli->write( str_pad ( $var['isunique'], 8 ));
+            $cli->write( str_pad ( $var['isconst'], 8 ));
+            $cli->write( str_pad ( $var['isnotnull'], 8 ));
+            $offset++;
+          }
+        }
+
+
+
+        $frametime = ( microtime(1) - $start ) * 1000 ;
+
+        if ( ( 1 / $targetFps * 1000 ) > $frametime ) {
+            usleep( 
+                ( 
+                    1 / $targetFps * 1000 // frames per ms
+                  - $frametime
+                ) * 1000  // µs
+            );
+        }
+
+        $frametime = ( microtime(1) - $start ) * 1000 ;
+
+        $cli->jump( $cli->getWidth() - strlen('fps: 30.00') ,$cli->getHeight() );
+        $cli->write( 'fps: '. number_format( (1 / $frametime)*1000 , 2 ) );
+
     }
-    
-    
-    
-    
-    $frametime = ( microtime(1) - $start ) * 1000 ;
-    
-    if ( ( 1 / $targetFps * 1000 ) > $frametime ) {
-      usleep( 
-        ( 
-          1 / $targetFps * 1000 // frames per ms
-        - $frametime
-        ) * 1000  // µs
-      );
-    }
-           
-    $frametime = ( microtime(1) - $start ) * 1000 ;
-    
-    $cli->jump( $cli->getWidth() - strlen('fps: 30.00') ,$cli->getHeight() );
-    $cli->write( 'fps: '. number_format( (1 / $frametime)*1000 , 2 ) );
-    
-    
-   
-   }
