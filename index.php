@@ -452,7 +452,9 @@
               
             }
              
-             
+            if ( $key === null )  {
+              return false;
+            }
            
              
             if ( isset( $this->registeredKeys[ $key ] ) ) {
@@ -460,6 +462,8 @@
                     $callback();
                 }
             }
+            
+            return true;
         }
     }
     
@@ -533,7 +537,7 @@
 
         $start = microtime(1);
 
-        $input->consume( $stdin );
+        $displayUpdate = $input->consume( $stdin );
 
         
         if ( !pg_connection_busy($pg) && !$initialized ) {
@@ -550,7 +554,11 @@
             $source = explode("\n",pg_fetch_assoc(pg_query("select * from pldbg_get_source({$channel}, {$oid})"))['pldbg_get_source']);
             $vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$channel})"));
             $initialized = true;
+            
+            $displayUpdate = true;
         }
+        
+        
         
         if ( !$attached ) {
           $cli->jump(0,0);
@@ -560,53 +568,57 @@
           $cli->write( 'connected');  
         }
         
-
-        // $cli->cls();
-        $cli->jump( 0,3 );
-        $cli->write( "Line: " .  ($result['linenumber'] ?? '') );
         
-        if ( $source ) {
-          
-          $offset = 5;
-          
-          for ( $line = 0; $line < $cli->getHeight() - $offset && $line < count($source); $line++ ) {
+        if ( $displayUpdate ) {
 
-              $cli->jump(0, $line + $offset );
+            // $cli->cls();
+            $cli->jump( 0,3 );
+            $cli->write( "Line: " .  ($result['linenumber'] ?? '') );
+            
+            if ( $source ) {
               
-              if ( isset($result['linenumber']) && ( $line + 1 ) == $result['linenumber'] ) {
-                $cli->write( str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line], Console::STYLE_BLUE);
-              } else {
-                $cli->write( str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line]);
+              $offset = 5;
+              
+              for ( $line = 0; $line < $cli->getHeight() - $offset && $line < count($source); $line++ ) {
+
+                  $cli->jump(0, $line + $offset );
+                  
+                  if ( isset($result['linenumber']) && ( $line + 1 ) == $result['linenumber'] ) {
+                    $cli->write( str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line], Console::STYLE_BLUE);
+                  } else {
+                    $cli->write( str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line]);
+                  }
+                  
+
               }
               
-
-          }
-          
-          // vars
-          
-          $cli->jump( $cli->getWidth() - 100 , $offset  - 1);
-          $cli->write( str_pad ( 'name', 20) );
-          $cli->write( str_pad ( 'value', 30) );
-          $cli->write( str_pad ( 'dtype', 30) );
-          $cli->write( str_pad ( 'class', 6 ));
-          $cli->write( str_pad ( 'line', 6 ));
-          $cli->write( str_pad ( 'U', 3 ));
-          $cli->write( str_pad ( 'C', 3 ));
-          $cli->write( str_pad ( 'N', 3 ));
-          
-          foreach( $vars as $var ) {
+              // vars
               
-            $cli->jump( $cli->getWidth() - 100, $offset );
-            $cli->write( str_pad ( $var['name'], 20) );
-            $cli->write( str_pad ( $var['value'], 30) );
-            $cli->write( str_pad ( $var['dtype'], 30) );
-            $cli->write( str_pad ( $var['varclass'], 6 ));
-            $cli->write( str_pad ( $var['linenumber'], 6 ));
-            $cli->write( str_pad ( $var['isunique'], 3 ));
-            $cli->write( str_pad ( $var['isconst'], 3 ));
-            $cli->write( str_pad ( $var['isnotnull'], 3 ));
-            $offset++;
-          }
+              $cli->jump( $cli->getWidth() - 100 , $offset  - 1);
+              $cli->write( str_pad ( 'name', 20) );
+              $cli->write( str_pad ( 'value', 30) );
+              $cli->write( str_pad ( 'dtype', 30) );
+              $cli->write( str_pad ( 'class', 6 ));
+              $cli->write( str_pad ( 'line', 6 ));
+              $cli->write( str_pad ( 'U', 3 ));
+              $cli->write( str_pad ( 'C', 3 ));
+              $cli->write( str_pad ( 'N', 3 ));
+              
+              foreach( $vars as $var ) {
+                  
+                $cli->jump( $cli->getWidth() - 100, $offset );
+                $cli->write( str_pad ( $var['name'], 20) );
+                $cli->write( str_pad ( $var['value'], 30) );
+                $cli->write( str_pad ( $var['dtype'], 30) );
+                $cli->write( str_pad ( $var['varclass'], 6 ));
+                $cli->write( str_pad ( $var['linenumber'], 6 ));
+                $cli->write( str_pad ( $var['isunique'], 3 ));
+                $cli->write( str_pad ( $var['isconst'], 3 ));
+                $cli->write( str_pad ( $var['isnotnull'], 3 ));
+                $offset++;
+              }
+            }
+          
         }
 
 
