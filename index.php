@@ -411,6 +411,7 @@
     class KeyInput {
       
         protected $registeredKeys = [];
+        public $lastKey = null;
       
         public function registerKey( string $key, $callback ): KeyInput {
             
@@ -420,42 +421,51 @@
       
         public function consume( $stream ) {
           
-            $keyCode = ord(fgetc($stream));
+            $keybuffer = [];
+            $key = null;
             
-            if ( !$keyCode ) {
+            for( $i = 0; $i < 6; $i++) {
+              $keybuffer[$i] = ord(fgetc($stream));
+            }
+            
+            if ( !$keybuffer[0] ) {
               return;
             }
+            
+            // normal keys
+            if ( $keybuffer[0] >= 48 && $keybuffer[0] <= 122 ) {
               
-            $key = null;
+              $key = chr($keybuffer[0]);
               
-            switch ( $keyCode ) {
-              // fkeys
-              case 113: $key = 'q'; break;
-              case 27:
-                $next = ord(fgetc($stream));
-                
-                if ( 
-                     $next              === 91 
-                  && ord(fgetc($stream)) === 49
-                  && ord(fgetc($stream)) === 53
-                  && ord(fgetc($stream)) === 126
-                ) {
-                  $key = 'F5';
-                } elseif (
-                     $next              === 79 
-                  && ord(fgetc($stream)) === 83
-                ) {
-                  $key = 'F4';
-                  
+            // alt hit
+            } elseif ( 
+                 $keybuffer[0] == 27 
+              && $keybuffer[1] >= 48 && $keybuffer[1] <= 122
+              && $keybuffer[2] == null
+            ) {
+              
+              $key = 'alt-' . chr( $keybuffer[1]);
+              
+            // f1-f4
+            } elseif (
+                 $keybuffer[0] == 27 
+              && $keybuffer[1] == 79
+              && $keybuffer[2] >= 80 && $keybuffer[2] <= 84
+              && $keybuffer[3] == null 
+            ) {
+                switch( $keybuffer[2] ) {
+                  case 80: $key = 'F1'; break;
+                  case 81: $key = 'F2'; break;
+                  case 82: $key = 'F3'; break;
+                  case 83: $key = 'F4'; break;
                 }
-                break;
-              
             }
-             
+            
             if ( $key === null )  {
               return false;
             }
-           
+            
+            $this->lastKey = $key;
              
             if ( isset( $this->registeredKeys[ $key ] ) ) {
                 foreach( $this->registeredKeys[ $key ] as $callback ) {
@@ -469,25 +479,127 @@
     
     class Debugger {
       
-        public function __construct() {
-          
+        private $pg;
+        
+        public $stack  = [];
+        public $vars   = [];
+        public $source = [];
+        private $breakpoints = [];
+        
+        private $channel = null;
+        
+        private $async_result;
+        
+        private $initialized = false;
+        private $attached    = false;
+        public $currentFrame = null;
+      
+        public function __construct( string $connection) {
+            $this->pg = \pg_connect( $connection );
+            pg_set_error_verbosity( $this->pg, \PGSQL_ERRORS_DEFAULT );
         }
+        
+        public function isInitialized(): bool {
+          return $this->initialized;
+        }
+        
+        public function isAttached(): bool {
+          return $this->attached;
+        }
+        
+        public function init() {
+          
+            // setup channel
+            
+            $this->channel = pg_fetch_assoc(pg_query('select pldbg_create_listener()'))['pldbg_create_listener'];
+            
+            // oid hardcoded to given functions
+            $this->addGlobalBreakPoint( 44556 );
+        }
+        
+        public function incrementStackFrame() {
+            if ( $this->currentFrame === null || $this->currentFrame + 1 >= count( $this->stack ) ) {
+              // nope
+              return;
+            }
+            
+            $this->currentFrame++;
+
+            pg_query("select pldbg_select_frame({$this->channel},{$this->currentFrame})");
+
+            $this->updateVars();
+            $this->updateSource();
+        }
+        
+        public function decrementStackFrame() {
+          
+            if ( $this->currentFrame === null || $this->currentFrame - 1 < 0 ) {
+              // nope
+              return;
+            }
+            
+            $this->currentFrame--;
+            
+            pg_query("select pldbg_select_frame({$this->channel},{$this->currentFrame})");
+            
+            $this->updateVars();
+            $this->updateSource();
+        }
+        
+        public function stepInto() {
+          
+            pg_query("select pldbg_step_into({$this->channel})");
+            
+            $this->updateStack();
+            $this->updateSource();
+            $this->updateVars();
+        }
+        
+        public function updateSource() {
+            $this->source = explode("\n",pg_fetch_assoc(pg_query("select pldbg_get_source as src  from pldbg_get_source({$this->channel}," . $this->stack[$this->currentFrame]['func'] . ")"))['src']);
+        }
+        
+        public function updateStack() {
+            $this->stack = pg_fetch_all(pg_query("select * from pldbg_get_stack({$this->channel})")) ?? [];
+            
+            $this->currentFrame = 0;
+        }
+        
+        public function updateVars() {
+            $this->vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$this->channel})"));
+        }
+        
+        public function addGlobalBreakPoint( int $oid , int $line = null ) {
+            pg_query("select pldbg_set_global_breakpoint({$this->channel},{$oid},null,null)");
+        }
+        
+        public function waitForConnection() {
+            $this->async_result = pg_send_query($this->pg, "select pldbg_wait_for_target({$this->channel})");
+        }
+        
+        public function checkForConnection() {
+          
+            if ( pg_connection_busy( $this->pg ) ) {
+                return false;
+            }
+            
+            // clear results from connection
+            pg_get_result( $this->pg );
+            
+            $this->attached = true;
+            return true;
+        }
+        
+        
+        
       
     }
 
     // setup application
     $cli = new Console();
     $cli->cls();
-
-    $pg = \pg_connect( 'host=localhost port=6666 dbname=docker user=docker password=docker' );
-    pg_set_error_verbosity( $pg, \PGSQL_ERRORS_DEFAULT );
-
-
-    $res = pg_query("select oid , proname , prosrc from pg_proc where proname = 'resource_timeline__termination_search'");
-    $data = pg_fetch_assoc($res);
-
-    $src = explode( "\n",$data['prosrc']);
-
+    
+    $connectionString = 'host=localhost port=6666 dbname=docker user=docker password=docker';
 
     // todo
     // save old settings with
@@ -509,67 +621,53 @@
         }
     );
     
-    $oid = 44556;
-    $channel = pg_fetch_assoc(pg_query('select pldbg_create_listener()'))['pldbg_create_listener'];
-    pg_query("select pldbg_set_global_breakpoint({$channel},{$oid},null,null)");
-
-    $async_result = pg_send_query($pg, "select pldbg_wait_for_target({$channel})");
-    
-    $result = [];
-    $source = [];
-    $vars   = [];
-    
     $attached = false;
     $initialized = false;
     
+    $debugger = new Debugger( $connectionString );
     $input = new KeyInput();
     
     $input->registerKey('q', function () { exit; });
-    $input->registerKey('F4', function () use ( &$result, &$vars, &$channel ) {
-      
-        pg_query("select pldbg_step_into({$channel})");
-        $result = pg_fetch_all(pg_query("select * from pldbg_get_stack({$channel})"))[0] ?? [];
-        $vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$channel})"));
-      
-    });
+    
+    $input->registerKey('F1', [$debugger,'decrementStackFrame'] );
+    $input->registerKey('F2', [$debugger,'incrementStackFrame'] );
+    $input->registerKey('F4', [$debugger,'stepInto'] );
+    
+    $debugger->init();
+    $debugger->waitForConnection();
+    $displayUpdate = false;
 
     while( true ) {
 
         $start = microtime(1);
-
         $displayUpdate = $input->consume( $stdin );
-
         
-        if ( !pg_connection_busy($pg) && !$initialized ) {
-          
-            // clear results from connection
-            pg_get_result( $pg );
-            $attached = true;
-            
-            // fetch source
-            
-            $result = pg_fetch_all(pg_query("select * from pldbg_get_stack({$channel})"))[0];
-
-            
-            $source = explode("\n",pg_fetch_assoc(pg_query("select * from pldbg_get_source({$channel}, {$oid})"))['pldbg_get_source']);
-            $vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$channel})"));
-            $initialized = true;
-            
+        // if not attached check for connection
+        if ( !$debugger->isAttached() && $debugger->checkForConnection() ) {
             $displayUpdate = true;
+            
+            $debugger->updateStack();
+            $debugger->updateSource( 44556 );
+            $debugger->updateVars();
         }
         
-        
-        
-        if ( !$attached ) {
-          $cli->jump(0,0);
-          $cli->write( 'waiting');  
+        if ( $debugger->isAttached() ) {
+          $cli->jump(0,1);
+          $cli->write( 'connected');  
         } else {
           $cli->jump(0,0);
-          $cli->write( 'connected');  
+          $cli->write( 'waiting');  
         }
         
         
         if ( $displayUpdate ) {
+          
+            $cli->cls();
+          
+            $result = $debugger->stack[0] ?? [];
+            $source = $debugger->source;
+            $vars = $debugger->vars;
+          
 
             // $cli->cls();
             $cli->jump( 0,3 );
@@ -592,6 +690,26 @@
 
               }
               
+              // stack
+              
+
+              
+              foreach( $debugger->stack  as $l ) {
+                
+                $cli->jump( $cli->getWidth() - 100, $offset );
+                
+                if ( $l['level'] == $debugger->currentFrame ) {
+                    $cli->write( implode($l,"\t"), Console::STYLE_BLUE );
+                } else {
+                    $cli->write( implode($l,"\t") );  
+                }
+                
+                
+                $offset++;
+              }
+              
+              $offset++;
+              $offset++;
               // vars
               
               $cli->jump( $cli->getWidth() - 100 , $offset  - 1);
@@ -617,6 +735,8 @@
                 $cli->write( str_pad ( $var['isnotnull'], 3 ));
                 $offset++;
               }
+              
+
             }
           
         }
@@ -636,7 +756,7 @@
 
         $frametime = ( microtime(1) - $start ) * 1000 ;
 
-        $cli->jump( $cli->getWidth() - strlen('fps: 30.00') ,$cli->getHeight() );
-        $cli->write( 'fps: '. number_format( (1 / $frametime)*1000 , 2 ) );
+        $cli->jump( $cli->getWidth() - strlen('[alt-q] fps: 30.00') ,$cli->getHeight() );
+        $cli->write( str_pad("[{$input->lastKey}]",7) .  '  fps: '. number_format( (1 / $frametime)*1000 , 2 ) );
 
     }
