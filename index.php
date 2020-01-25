@@ -408,10 +408,58 @@
 
         }
     
-    class KeyMapper {
+    class KeyInput {
       
-        public function consume( $handle ) {
-            getLastKey();
+        protected $registeredKeys = [];
+      
+        public function registerKey( string $key, $callback ): KeyInput {
+            
+            $this->registeredKeys[$key][] = $callback;
+            return $this;
+        }
+      
+        public function consume( $stream ) {
+          
+            $keyCode = ord(fgetc($stream));
+            
+            if ( !$keyCode ) {
+              return;
+            }
+              
+            $key = null;
+              
+            switch ( $keyCode ) {
+              // fkeys
+              case 113: $key = 'q'; break;
+              case 27:
+                $next = ord(fgetc($stream));
+                
+                if ( 
+                     $next              === 91 
+                  && ord(fgetc($stream)) === 49
+                  && ord(fgetc($stream)) === 53
+                  && ord(fgetc($stream)) === 126
+                ) {
+                  $key = 'F5';
+                } elseif (
+                     $next              === 79 
+                  && ord(fgetc($stream)) === 83
+                ) {
+                  $key = 'F4';
+                  
+                }
+                break;
+              
+            }
+             
+             
+           
+             
+            if ( isset( $this->registeredKeys[ $key ] ) ) {
+                foreach( $this->registeredKeys[ $key ] as $callback ) {
+                    $callback();
+                }
+            }
         }
     }
     
@@ -469,12 +517,24 @@
     
     $attached = false;
     $initialized = false;
+    
+    $input = new KeyInput();
+    
+    $input->registerKey('q', function () { exit; });
+    $input->registerKey('F4', function () use ( &$result, &$vars, &$channel ) {
+      
+        pg_query("select pldbg_step_into({$channel})");
+        $result = pg_fetch_all(pg_query("select * from pldbg_get_stack({$channel})"))[0] ?? [];
+        $vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$channel})"));
+      
+    });
 
     while( true ) {
 
         $start = microtime(1);
-        $key = '';
-        $keyCode = ord(fgetc($stdin));
+
+        $input->consume( $stdin );
+
         
         if ( !pg_connection_busy($pg) && !$initialized ) {
           
@@ -492,9 +552,6 @@
             $initialized = true;
         }
         
-        $cli->jump(0,10);
-        $cli->write( $key );  
-        
         if ( !$attached ) {
           $cli->jump(0,0);
           $cli->write( 'waiting');  
@@ -503,56 +560,6 @@
           $cli->write( 'connected');  
         }
         
-        if ( $keyCode ) {
-          
-          
-          switch ( $keyCode ) {
-            // fkeys
-            case 113: $key = 'q'; die(); break;
-            case 27:
-              $next = ord(fgetc($stdin));
-              
-              if ( 
-                   $next              === 91 
-                && ord(fgetc($stdin)) === 49
-                && ord(fgetc($stdin)) === 53
-                && ord(fgetc($stdin)) === 126
-              ) {
-                $key = 'F5';
-              } elseif (
-                   $next              === 79 
-                && ord(fgetc($stdin)) === 83
-              ) {
-                $key = 'F4';
-                
-              }
-              break;
-            
-          }
-          
-        }
-        
-        switch ( $key ) {
-          case 'q': 
-          
-            // if ( !pg_connection_busy($pg) ) {
-            //     pg_query("SELECT pldbg_abort_target({$channel})"); 
-                
-            // }
-            
-            // pg_close( $pg );
-            
-            exit;
-          case 'F4':
-             $result = pg_fetch_assoc(pg_query("select linenumber from pldbg_step_into({$channel})"));
-             $result = pg_fetch_all(pg_query("select * from pldbg_get_stack({$channel})"))[0];
-             $vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$channel})"));
-             
-             // $cli->cls();
-             // var_dump( $vars ); die();
-             
-             
-        }
 
         // $cli->cls();
         $cli->jump( 0,3 );
@@ -577,27 +584,27 @@
           
           // vars
           
-          $cli->jump( $cli->getWidth() - 80 , $offset  - 1);
+          $cli->jump( $cli->getWidth() - 100 , $offset  - 1);
           $cli->write( str_pad ( 'name', 20) );
-          $cli->write( str_pad ( 'dtype', 10) );
-          $cli->write( str_pad ( 'value', 10) );
+          $cli->write( str_pad ( 'value', 30) );
+          $cli->write( str_pad ( 'dtype', 30) );
           $cli->write( str_pad ( 'class', 6 ));
           $cli->write( str_pad ( 'line', 6 ));
-          $cli->write( str_pad ( 'unique', 8 ));
-          $cli->write( str_pad ( 'const', 8 ));
-          $cli->write( str_pad ( 'notnull', 8 ));
+          $cli->write( str_pad ( 'U', 3 ));
+          $cli->write( str_pad ( 'C', 3 ));
+          $cli->write( str_pad ( 'N', 3 ));
           
           foreach( $vars as $var ) {
               
-            $cli->jump( $cli->getWidth() - 80, $offset );
+            $cli->jump( $cli->getWidth() - 100, $offset );
             $cli->write( str_pad ( $var['name'], 20) );
-            $cli->write( str_pad ( $var['dtype'], 10) );
-            $cli->write( str_pad ( $var['value'], 10) );
+            $cli->write( str_pad ( $var['value'], 30) );
+            $cli->write( str_pad ( $var['dtype'], 30) );
             $cli->write( str_pad ( $var['varclass'], 6 ));
             $cli->write( str_pad ( $var['linenumber'], 6 ));
-            $cli->write( str_pad ( $var['isunique'], 8 ));
-            $cli->write( str_pad ( $var['isconst'], 8 ));
-            $cli->write( str_pad ( $var['isnotnull'], 8 ));
+            $cli->write( str_pad ( $var['isunique'], 3 ));
+            $cli->write( str_pad ( $var['isconst'], 3 ));
+            $cli->write( str_pad ( $var['isnotnull'], 3 ));
             $offset++;
           }
         }
