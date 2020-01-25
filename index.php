@@ -465,15 +465,17 @@
               return false;
             }
             
+            $hadCallback = false;
             $this->lastKey = $key;
              
             if ( isset( $this->registeredKeys[ $key ] ) ) {
                 foreach( $this->registeredKeys[ $key ] as $callback ) {
                     $callback();
+                    $hadCallback = true;
                 }
             }
             
-            return true;
+            return $hadCallback;
         }
     }
     
@@ -611,15 +613,7 @@
 
     $targetFps = 30;
 
-    pcntl_async_signals(true);
-    
-    pcntl_signal(
-        SIGWINCH,
-        function () use ($cli): void {
-            $cli->updateDimensions();
-            $cli->cls();
-        }
-    );
+
     
     $attached = false;
     $initialized = false;
@@ -635,7 +629,19 @@
     
     $debugger->init();
     $debugger->waitForConnection();
+    
     $displayUpdate = false;
+    $forceRedraw = false;
+    
+    pcntl_async_signals(true);
+    
+    pcntl_signal(
+        SIGWINCH,
+        function () use ($cli, &$forceRedraw): void {
+            $cli->updateDimensions();
+            $forceRedraw = true;
+        }
+    );
 
     while( true ) {
 
@@ -651,16 +657,15 @@
             $debugger->updateVars();
         }
         
-        if ( $debugger->isAttached() ) {
-          $cli->jump(0,1);
-          $cli->write( 'connected');  
-        } else {
+        if ( !$debugger->isAttached() ) {
           $cli->jump(0,0);
           $cli->write( 'waiting');  
         }
         
         
-        if ( $displayUpdate ) {
+        if ( $displayUpdate || $forceRedraw ) {
+          
+            $forceRedraw = false;
           
             $cli->cls();
           
@@ -670,7 +675,7 @@
           
 
             // $cli->cls();
-            $cli->jump( 0,3 );
+            $cli->jump( 4,3 );
             $cli->write( "Line: " .  ($result['linenumber'] ?? '') );
             
             if ( $source ) {
