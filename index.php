@@ -413,9 +413,12 @@
         protected $registeredKeys = [];
         public $lastKey = null;
       
-        public function registerKey( string $key, $callback ): KeyInput {
+        public function registerKey( string $key, ... $callbacks ): KeyInput {
             
-            $this->registeredKeys[$key][] = $callback;
+            foreach( $callbacks as $callback ) {
+                $this->registeredKeys[$key][] = $callback;
+            }
+            
             return $this;
         }
       
@@ -459,6 +462,66 @@
                   case 82: $key = 'F3'; break;
                   case 83: $key = 'F4'; break;
                 }
+
+            // f5-f8
+            } elseif (
+                 $keybuffer[0] == 27 
+              && $keybuffer[1] == 91
+              && $keybuffer[2] == 49
+              && in_array( $keybuffer[3], [53,55,56,57] )
+              && $keybuffer[4] == 126
+              && $keybuffer[5] == null
+            ) {
+                switch( $keybuffer[3] ) {
+                  case 53: $key = 'F5'; break;
+                  case 55: $key = 'F6'; break;
+                  case 56: $key = 'F7'; break;
+                  case 57: $key = 'F8'; break;
+                }
+                
+            // f9-f12
+            } elseif (
+                 $keybuffer[0] == 27 
+              && $keybuffer[1] == 91
+              && $keybuffer[2] == 50
+              && in_array( $keybuffer[3], [48,49,51,52] )
+              && $keybuffer[4] == 126
+              && $keybuffer[5] == null
+            ) {
+                switch( $keybuffer[3] ) {
+                  case 48: $key = 'F9'; break;
+                  case 49: $key = 'F10'; break;
+                  case 51: $key = 'F11'; break;
+                  case 52: $key = 'F12'; break;
+                }
+            
+            // navigation
+            } elseif (
+                 $keybuffer[0] == 27 
+              && $keybuffer[1] == 91
+              && ( $keybuffer[2] >= 65 && $keybuffer[2] <= 68 || $keybuffer[2] == 72  )
+              && $keybuffer[3] == null 
+            ) {
+                switch( $keybuffer[2] ) {
+                  case 65: $key = 'up'; break;
+                  case 66: $key = 'down'; break;
+                  case 67: $key = 'right'; break;
+                  case 68: $key = 'left'; break;
+                  case 72: $key = 'pos1'; break;
+                }
+            // navigation2
+            } elseif (
+                 $keybuffer[0] == 27 
+              && $keybuffer[1] == 91
+              && $keybuffer[2] >= 52 && $keybuffer[2] <= 54
+              && $keybuffer[3] == 126 
+              && $keybuffer[4] == null 
+            ) {
+                switch( $keybuffer[2] ) {
+                  case 52: $key = 'end'; break;
+                  case 53: $key = 'pgup'; break;
+                  case 54: $key = 'pgdown'; break;
+                }
             }
             
             if ( $key === null )  {
@@ -486,7 +549,7 @@
         public $stack  = [];
         public $vars   = [];
         public $source = [];
-        private $breakpoints = [];
+        public $breakpoints = [];
         
         private $channel = null;
         
@@ -526,11 +589,7 @@
             }
             
             $this->currentFrame++;
-
             pg_query("select pldbg_select_frame({$this->channel},{$this->currentFrame})");
-
-            $this->updateVars();
-            $this->updateSource();
         }
         
         public function decrementStackFrame() {
@@ -541,20 +600,22 @@
             }
             
             $this->currentFrame--;
-            
             pg_query("select pldbg_select_frame({$this->channel},{$this->currentFrame})");
-            
-            $this->updateVars();
-            $this->updateSource();
         }
         
         public function stepInto() {
-          
             pg_query("select pldbg_step_into({$this->channel})");
-            
-            $this->updateStack();
-            $this->updateSource();
-            $this->updateVars();
+        }
+        
+        public function stepOver() {
+            pg_query("select pldbg_step_over({$this->channel})");
+        }
+
+        public function continue() {
+            pg_query("select pldbg_continue({$this->channel})");
+        }
+        public function abort() {
+            pg_query("select pldbg_abort_target({$this->channel})");
         }
         
         public function updateSource() {
@@ -569,6 +630,10 @@
         
         public function updateVars() {
             $this->vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$this->channel})"));
+        }
+        
+        public function updateBreakpoints() {
+            $this->breakpoints   = pg_fetch_all(pg_query("select * from pldbg_get_breakpoints({$this->channel})"));
         }
         
         public function addGlobalBreakPoint( int $oid , int $line = null ) {
@@ -592,7 +657,12 @@
             return true;
         }
         
-        
+        public function refresh() {
+          $this->updateStack();
+          $this->updateSource();
+          $this->updateVars();
+          $this->updateBreakpoints();
+        }
         
       
     }
@@ -623,9 +693,26 @@
     
     $input->registerKey('q', function () { exit; });
     
-    $input->registerKey('F1', [$debugger,'decrementStackFrame'] );
-    $input->registerKey('F2', [$debugger,'incrementStackFrame'] );
-    $input->registerKey('F4', [$debugger,'stepInto'] );
+    // for the stackframe we cannot use the convient function, because its resets the stack info
+    $input->registerKey(
+        'F1', 
+        [$debugger,'decrementStackFrame'], [$debugger,'updateVars'], [$debugger,'updateSource'] 
+    );
+    $input->registerKey(
+        'F2', 
+        [$debugger,'incrementStackFrame'], [$debugger,'updateVars'], [$debugger,'updateSource']  
+    );
+    
+    // step into
+    $input->registerKey('F4', [$debugger,'stepInto'], [$debugger,'refresh']  );
+    
+    // step over
+    $input->registerKey('F5', [$debugger,'stepOver'], [$debugger,'refresh']  );
+    
+    // step over
+    $input->registerKey('F8', [$debugger,'continue'], [$debugger,'refresh']  );
+    
+    $input->registerKey('F10', [$debugger,'abort'] );
     
     $debugger->init();
     $debugger->waitForConnection();
@@ -761,7 +848,7 @@
 
         $frametime = ( microtime(1) - $start ) * 1000 ;
 
-        $cli->jump( $cli->getWidth() - strlen('[alt-q] fps: 30.00') ,$cli->getHeight() );
-        $cli->write( str_pad("[{$input->lastKey}]",7) .  '  fps: '. number_format( (1 / $frametime)*1000 , 2 ) );
+        $cli->jump( $cli->getWidth() - strlen('[pgdown] fps: 30.00') ,$cli->getHeight() );
+        $cli->write( str_pad("[{$input->lastKey}]",8) .  '  fps: '. number_format( (1 / $frametime)*1000 , 2 ) );
 
     }
