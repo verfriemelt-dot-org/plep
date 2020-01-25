@@ -571,9 +571,9 @@
         private $attached    = false;
         public $currentFrame = null;
       
-        public function __construct( string $connection) {
-            $this->pg = \pg_connect( $connection );
-            pg_set_error_verbosity( $this->pg, \PGSQL_ERRORS_DEFAULT );
+        public function setConnectionHandle( $pg ) {
+            $this->pg = $pg;
+            return $this;
         }
         
         public function isInitialized(): bool {
@@ -636,12 +636,11 @@
         
         public function updateStack() {
             $this->stack = pg_fetch_all(pg_query("select * from pldbg_get_stack({$this->channel})")) ?? [];
-            
             $this->currentFrame = 0;
         }
         
         public function updateVars() {
-            $this->vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$this->channel})"));
+            $this->vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$this->channel})")) ?? [];
         }
         
         public function updateBreakpoints() {
@@ -675,16 +674,98 @@
           $this->updateVars();
           $this->updateBreakpoints();
         }
-        
+    }
+    
+    class ConsoleFrame {
       
+        private $cli;
+        
+        private $pos, $height, $width, $border = false, $buffer = [];
+        
+        public function __construct( Console $cli ) {
+            $this->cli = $cli;
+            
+            $this->height = $cli->getHeight();
+            $this->width = $cli->getWidth();
+        }
+        
+        public function setPosition( $x, $y ) {
+            $this->pos = [
+              'x' => $x,
+              'y' => $y,
+            ];
+            
+            return $this;
+        }
+        
+        public function setDimension( $width, $height ) {
+          
+            $this->width = $width;
+            $this->height = $height;
+            
+            return $this;
+        }
+        
+        // wipes rectangle with spaces
+        private function blank() {
+            
+            for( 
+                $h = 0; 
+                   $h <= $this->height 
+                && $h < ($this->cli->getHeight() - $this->pos['y']);
+                $h++ 
+            ) {
+              
+              // if window overflows the window with limit blanking width
+              // to stay within borders
+              if ( $this->cli->getWidth() < $this->pos['x'] + $this->width ) {
+                $blankWidth = $this->cli->getWidth() - $this->pos['x'];
+              } else {
+                $blankWidth = $this->width;
+              }
+              
+              $this->cli->jump( $this->pos['x'], $this->pos['y'] + $h );  
+              $this->cli->write( str_repeat(" ", $blankWidth ) );
+            }
+        }
+        
+        public function addToBuffer( $line, $style = null ) {
+            $this->buffer[] = [ $line, $style ];
+            return $this;
+        }
+        
+        public function clearBuffer() {
+          $this->buffer = [];
+          return $this;
+        }
+        
+        public function render() {
+            
+            $this->blank();
+            
+            $offset = 0;
+            foreach( $this->buffer as [ $line, $style ] ) {
+              
+              $this->cli->jump( $this->pos['x'], $this->pos['y'] + $offset );
+              $this->cli->write( $line, $style );
+              $offset++;
+            }
+        }
     }
 
-    // setup application
-    $cli = new Console();
-    $cli->cls();
-    
+    // hardcoded for now
     $connectionString = 'host=localhost port=6666 dbname=docker user=docker password=docker';
+    
+    // setup application
+    $earlyConsole = new Console();
+    $earlyConsole->setPrefixCallback( function () {
+        return "[" . (new DateTime )->format( "H:i:s.u" ) . "] ";
+    });
+    
 
+    
+    $earlyConsole->writeLn('setting up tty');
+    
     // todo
     // save old settings with
     // stty -g < /dev/tty
@@ -693,16 +774,26 @@
     $stdin = fopen('php://stdin', 'r');
     stream_set_blocking($stdin, 0);
 
-    $targetFps = 30;
 
-
+    $earlyConsole->writeLn('setting application');    
     
+    $targetFps = 30;
     $attached = false;
     $initialized = false;
     
-    $debugger = new Debugger( $connectionString );
+    $cli = new Console();
+    $debugger = new Debugger();
     $input = new KeyInput();
     
+    $earlyConsole->writeLn('connecting to database');    
+    
+    $pg = \pg_connect( $connectionString );
+    \pg_set_error_verbosity( $pg, \PGSQL_ERRORS_DEFAULT );
+    
+    $debugger->setConnectionHandle( $pg );
+
+    $earlyConsole->writeLn('setting up shortcuts');    
+        
     $input->registerKey('q', function () { exit; });
     
     // for the stackframe we cannot use the convient function, because its resets the stack info
@@ -726,11 +817,16 @@
     
     $input->registerKey('F10', [$debugger,'abort'] );
     
+    
+    $earlyConsole->writeLn('creating debug session');    
+    
     $debugger->init();
     $debugger->waitForConnection();
     
     $displayUpdate = false;
     $forceRedraw = false;
+    
+    $earlyConsole->writeLn('registering resize handler');    
     
     pcntl_async_signals(true);
     
@@ -741,6 +837,39 @@
             $forceRedraw = true;
         }
     );
+
+    $earlyConsole->writeLn('waiting for target');
+    
+    // lazy ass exception handling
+    set_exception_handler( function ( $e ) {
+      
+        (new Console())->cls();
+
+        echo $e->getTraceAsString() . PHP_EOL . PHP_EOL . PHP_EOL;
+        print_r( $e );
+        die();
+    } );
+
+    set_error_handler( function ( $errno, $errstr, $errfile, $errline ) {
+        throw new ErrorException( $errstr, 0, $errno, $errfile, $errline );
+    } );
+
+    $cli->updateDimensions();
+    $cli->cls();
+    
+    $sourceFrame = new ConsoleFrame( $cli );
+    $sourceFrame->setPosition( 0, 2 );
+    
+    // take all space down
+    $sourceFrame->setDimension( 80, 1000 );
+
+    $stackFrame = new ConsoleFrame( $cli );
+    $stackFrame->setPosition( 70, 2 );
+    
+    // take all space down
+    $stackFrame->setDimension( 1000, 1000 );
+
+    
 
     while( true ) {
 
@@ -768,75 +897,76 @@
           
             $cli->cls();
           
-            $result = $debugger->stack[0] ?? [];
+            $result = $debugger->stack[ $debugger->currentFrame ] ?? [];
             $source = $debugger->source;
             $vars = $debugger->vars;
-          
-
-            // $cli->cls();
-            $cli->jump( 4,3 );
-            $cli->write( "Line: " .  ($result['linenumber'] ?? '') );
             
+
             if ( $source ) {
               
-              $offset = 5;
+              // sourcecode
+              $sourceFrame->clearBuffer();
+              $sourceFrame->addToBuffer( 
+                  str_repeat(' ', 7) . $debugger->stack[ $debugger->currentFrame ]['targetname'], 
+                  Console::STYLE_BOLD
+              );
+              $sourceFrame->addToBuffer('');
               
-              for ( $line = 0; $line < $cli->getHeight() - $offset && $line < count($source); $line++ ) {
+              for ( $line = 0; $line < count( $source ); $line++ ) {
 
-                  $cli->jump(0, $line + $offset );
-                  
-                  if ( isset($result['linenumber']) && ( $line + 1 ) == $result['linenumber'] ) {
-                    $cli->write( str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line], Console::STYLE_BLUE);
-                  } else {
-                    $cli->write( str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line]);
-                  }
-                  
-
+                  $sourceFrame->addToBuffer(
+                      str_pad( $line + 1, 4,' ', \STR_PAD_LEFT ) . ": " . $source[$line],
+                      ( $line + 1 ) == $result['linenumber'] ? Console::STYLE_BLUE : Console::STYLE_NONE
+                  );
               }
+              
+              $sourceFrame->render();
               
               // stack
+              $stackFrame->clearBuffer();
+              
               foreach( $debugger->stack  as $l ) {
                 
-                $cli->jump( $cli->getWidth() - 100, $offset );
-                
                 $text = "{$l['level']} » {$l['targetname']}:{$l['func']} » {$l['args']}";
-                $cli->write( $text , $l['level'] == $debugger->currentFrame ? Console::STYLE_BLUE : null );
-                
-                
-                $offset++;
+                $stackFrame->addToBuffer( 
+                    $text , 
+                    ($l['level'] == $debugger->currentFrame ) ? Console::STYLE_BLUE : Console::STYLE_NONE 
+                );
               }
               
-              $offset++;
-              $offset++;
-              // vars
+              $stackFrame->addToBuffer('');
+              $stackFrame->addToBuffer('');
               
-              $cli->jump( $cli->getWidth() - 100 , $offset  - 1);
-              $cli->write( str_pad ( 'name', 20) );
-              $cli->write( str_pad ( 'value', 30) );
-              $cli->write( str_pad ( 'dtype', 30) );
-              $cli->write( str_pad ( 'class', 6 ));
-              $cli->write( str_pad ( 'line', 6 ));
-              $cli->write( str_pad ( 'U', 3 ));
-              $cli->write( str_pad ( 'C', 3 ));
-              $cli->write( str_pad ( 'N', 3 ));
+              // vars
+              $stackFrame->addToBuffer(
+                  str_pad ( 'name', 20)  .
+                  str_pad ( 'value', 30)  .
+                  str_pad ( 'dtype', 30)  .
+                  str_pad ( 'class', 6 ) .
+                  str_pad ( 'line', 6 ) .
+                  str_pad ( 'U', 3 ) .
+                  str_pad ( 'C', 3 ) .
+                  str_pad ( 'N', 3 ),
+                  Console::STYLE_BOLD
+              );
               
               foreach( $vars as $var ) {
-                  
-                $cli->jump( $cli->getWidth() - 100, $offset );
-                $cli->write( str_pad ( $var['name'], 20) );
-                $cli->write( str_pad ( $var['value'], 30) );
-                $cli->write( str_pad ( $var['dtype'], 30) );
-                $cli->write( str_pad ( $var['varclass'], 6 ));
-                $cli->write( str_pad ( $var['linenumber'], 6 ));
-                $cli->write( str_pad ( $var['isunique'], 3 ));
-                $cli->write( str_pad ( $var['isconst'], 3 ));
-                $cli->write( str_pad ( $var['isnotnull'], 3 ));
-                $offset++;
+                    
+                $stackFrame->addToBuffer(
+                    
+                    str_pad ( $var['name'], 20)  .
+                    str_pad ( $var['value'], 30)  .
+                    str_pad ( $var['dtype'], 30)  .
+                    str_pad ( $var['varclass'], 6 ) .
+                    str_pad ( $var['linenumber'], 6 ) .
+                    str_pad ( $var['isunique'], 3 ) .
+                    str_pad ( $var['isconst'], 3 ) .
+                    str_pad ( $var['isnotnull'], 3 )
+                );
               }
               
-
+              $stackFrame->render();
             }
-          
         }
 
 
