@@ -1,7 +1,7 @@
 # plep
 console pldebugger interface
 
-![](image.png)
+![](https://raw.githubusercontent.com/verfriemelt-dot-org/plep/master/image.png)
 
 ## Keys:
 
