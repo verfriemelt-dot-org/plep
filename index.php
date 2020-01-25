@@ -828,15 +828,7 @@
     
     $earlyConsole->writeLn('registering resize handler');    
     
-    pcntl_async_signals(true);
-    
-    pcntl_signal(
-        SIGWINCH,
-        function () use ($cli, &$forceRedraw): void {
-            $cli->updateDimensions();
-            $forceRedraw = true;
-        }
-    );
+
 
     $earlyConsole->writeLn('waiting for target');
     
@@ -859,17 +851,26 @@
     
     $sourceFrame = new ConsoleFrame( $cli );
     $sourceFrame->setPosition( 0, 2 );
-    
-    // take all space down
-    $sourceFrame->setDimension( 80, 1000 );
+    $sourceFrame->setDimension( $cli->getWidth() - 100 , $cli->getHeight() - 2 );
 
     $stackFrame = new ConsoleFrame( $cli );
-    $stackFrame->setPosition( 70, 2 );
-    
-    // take all space down
-    $stackFrame->setDimension( 1000, 1000 );
+    $stackFrame->setPosition( $cli->getWidth() - 100, 2 );
+    $stackFrame->setDimension( $cli->getWidth() - 100 , $cli->getHeight() - 2 );
 
+    pcntl_async_signals(true);
     
+    pcntl_signal(
+        SIGWINCH,
+        function () use ($cli, &$forceRedraw, $stackFrame, $sourceFrame): void {
+            $cli->updateDimensions();
+            $forceRedraw = true;
+            
+            $sourceFrame->setDimension( $cli->getWidth() - 100 , $cli->getHeight() - 2 );
+            
+            $stackFrame->setPosition( $cli->getWidth() - 100, 2 );
+            $stackFrame->setDimension( $cli->getWidth() - 100 , $cli->getHeight() - 2 );
+        }
+    );
 
     while( true ) {
 
