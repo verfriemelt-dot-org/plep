@@ -435,12 +435,12 @@
               return;
             }
             
-            // normal keys
-            if ( $keybuffer[0] >= 48 && $keybuffer[0] <= 122 ) {
+            // normal keys with ?!<> etc.
+            if ( $keybuffer[0] >= 33 && $keybuffer[0] <= 125 ) {
               
               $key = chr($keybuffer[0]);
               
-            // alt hit
+            // alt alfa-num
             } elseif ( 
                  $keybuffer[0] == 27 
               && $keybuffer[1] >= 48 && $keybuffer[1] <= 122
@@ -448,6 +448,17 @@
             ) {
               
               $key = 'alt-' . chr( $keybuffer[1]);
+            } elseif( 
+                   in_array( $keybuffer[0], [ 13, 127, 32 ] )
+                && $keybuffer[1] == null
+            ) {
+              
+              switch( $keybuffer[0] ) {
+                case 13: $key = 'enter'; break;
+                case 32: $key = 'space'; break;
+                case 127: $key = 'bcksp'; break;
+              }
+              
               
             // f1-f4
             } elseif (
@@ -499,7 +510,7 @@
             } elseif (
                  $keybuffer[0] == 27 
               && $keybuffer[1] == 91
-              && ( $keybuffer[2] >= 65 && $keybuffer[2] <= 68 || $keybuffer[2] == 72  )
+              && ( $keybuffer[2] >= 65 && $keybuffer[2] <= 68 || $keybuffer[2] == 72 || $keybuffer[2] == 80  )
               && $keybuffer[3] == null 
             ) {
                 switch( $keybuffer[2] ) {
@@ -508,6 +519,7 @@
                   case 67: $key = 'right'; break;
                   case 68: $key = 'left'; break;
                   case 72: $key = 'pos1'; break;
+                  case 80: $key = 'del'; break;
                 }
             // navigation2
             } elseif (
@@ -579,7 +591,7 @@
             $this->channel = pg_fetch_assoc(pg_query('select pldbg_create_listener()'))['pldbg_create_listener'];
             
             // oid hardcoded to given functions
-            $this->addGlobalBreakPoint( 44556 );
+            $this->addGlobalBreakPoint( 44566 );
         }
         
         public function incrementStackFrame() {
@@ -677,7 +689,7 @@
     // save old settings with
     // stty -g < /dev/tty
     // restore later with stty $old < /dev/tty
-    system('stty -echo -icanon min 1 time 0 < /dev/tty');
+    system('stty -echo cbreak min 1 time 0 < /dev/tty');
     $stdin = fopen('php://stdin', 'r');
     stream_set_blocking($stdin, 0);
 
@@ -740,7 +752,7 @@
             $displayUpdate = true;
             
             $debugger->updateStack();
-            $debugger->updateSource( 44556 );
+            $debugger->updateSource();
             $debugger->updateVars();
         }
         
@@ -783,18 +795,12 @@
               }
               
               // stack
-              
-
-              
               foreach( $debugger->stack  as $l ) {
                 
                 $cli->jump( $cli->getWidth() - 100, $offset );
                 
-                if ( $l['level'] == $debugger->currentFrame ) {
-                    $cli->write( implode($l,"\t"), Console::STYLE_BLUE );
-                } else {
-                    $cli->write( implode($l,"\t") );  
-                }
+                $text = "{$l['level']} » {$l['targetname']}:{$l['func']} » {$l['args']}";
+                $cli->write( $text , $l['level'] == $debugger->currentFrame ? Console::STYLE_BLUE : null );
                 
                 
                 $offset++;
