@@ -40,11 +40,20 @@
             return $this->width;
         }
 
+        private function getRenderHeight(): int {
+
+            if ( $this->cli->getHeight() < $this->pos['y'] + $this->height ) {
+                return $this->cli->getHeight() - $this->pos['y'];
+            }
+
+            return $this->height;
+        }
+
         // wipes rectangle with spaces
         private function blank() {
 
             for (
-            $h = 0; $h <= $this->height && $h < ($this->cli->getHeight() - $this->pos['y']); $h++
+            $h = 0; $h <= $this->height && $h < $this->getRenderHeight(); $h++
             ) {
 
                 $blankWidth = $this->getRenderWidth();
@@ -69,13 +78,17 @@
             $this->blank();
 
             $offset = 0;
+
             foreach ( $this->buffer as [$line, $style] ) {
 
                 $this->cli->jump( $this->pos['x'], $this->pos['y'] + $offset );
-                $this->cli->write( $line, $style );
+                $this->cli->write( mb_substr( $line, 0, $this->getRenderWidth() ), $style );
                 $offset++;
+
+                if ( $offset > $this->getRenderHeight() ) {
+                    break;
+                }
             }
         }
 
     }
-    
