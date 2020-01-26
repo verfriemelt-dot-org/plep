@@ -1,840 +1,108 @@
 <?php
 
-    class Console {
 
-        const STYLE_NONE      = 0;
-        const STYLE_BLACK     = 30;
-        const STYLE_RED       = 31;
-        const STYLE_GREEN     = 32;
-        const STYLE_YELLOW    = 33;
-        const STYLE_BLUE      = 34;
-        const STYLE_PURPLE    = 35;
-        const STYLE_CYAN      = 36;
-        const STYLE_WHITE     = 37;
-        const STYLE_REGULAR   = "0";
-        const STYLE_BOLD      = "1";
-        const STYLE_UNDERLINE = "4";
-
-        protected $currentFgColor   = SELF::STYLE_NONE;
-        protected $currentBgColor   = SELF::STYLE_NONE;
-        protected $currentFontStyle = SELF::STYLE_REGULAR;
-        protected $selectedStream;
-        protected $stdout           = STDOUT;
-        protected $stderr           = STDERR;
-        protected $linePrefixFunc;
-        protected $hadLineOutput    = false;
-        protected $dimensions       = null;
-        protected $inTerminal = false;
-        protected $colorSupported = null;
-        protected $forceColor     = false;
-
-        /**
-         *
-         * @var ParameterBag
-         */
-        protected $argv;
-
-        public static function getInstance(): Console {
-            return new static( isset( $_SERVER["argv"] ) ? $_SERVER["argv"] : [] );
-        }
-
-        public function __construct() {
-
-            $this->selectedStream = &$this->stdout;
-            $this->argv           = new ParameterBag( $_SERVER["argv"] ?? [] );
-
-            $this->inTerminal = isset( $_SERVER['TERM'] );
-        }
-
-        public static function isCli(): bool {
-            return php_sapi_name() === "cli";
-        }
-
-        public function getArgv(): ParameterBag {
-            return $this->argv;
-        }
-
-        public function getArgvAsString(): string {
-
-            // omit first element
-            return implode( " ", $this->argv->except( [ 0 ] ) );
-        }
-
-        public function setPrefixCallback( callable $func ): Console {
-            $this->linePrefixFunc = $func;
-            return $this;
-        }
-
-        public function toSTDOUT(): Console {
-            $this->selectedStream = &$this->stdout;
-            return $this;
-        }
-
-        public function toSTDERR(): Console {
-            $this->selectedStream = &$this->stderr;
-            return $this;
-        }
-
-        public function write( $text, $color = null ): Console {
-
-            if ( $color !== null ) {
-                $this->setForegroundColor( $color );
-            }
-
-            if ( $this->linePrefixFunc !== null && $this->hadLineOutput !== true ) {
-                fwrite( $this->selectedStream, ($this->linePrefixFunc)() );
-                $this->hadLineOutput = true;
-            }
-
-            fwrite( $this->selectedStream, $text );
-
-            if ( $color !== null ) {
-                $this->setForegroundColor( static::STYLE_NONE );
-            }
-
-            return $this;
-        }
-
-        public function writeLn( $text, $color = null ): Console {
-            return $this->write( $text, $color )->eol();
-        }
-
-        public function cr(): Console {
-            $this->write( "\r" );
-            return $this;
-        }
-
-        public function eol(): Console {
-            $this->write( PHP_EOL );
-            $this->hadLineOutput = false;
-            return $this;
-        }
-
-        public function writePadded( $text, $padding = 4, $paddingChar = " ", $color = null ): Console {
-            $this->write( str_repeat( $paddingChar, $padding ) );
-            $this->write( $text, $color );
-
-            return $this;
-        }
-
-        // this is blocking
-        public function read() {
-            return fgets( STDIN );
-        }
-
-        protected function setOutputStyling() {
-
-            if ( $this->colorSupported === null ) {
-                $this->colorSupported = $this->supportsColor();
-            }
-
-            if ( !$this->colorSupported ) {
-                return;
-            }
-
-            $this->write( "\e[{$this->currentFontStyle};{$this->currentFgColor}m" );
-
-            if ( $this->currentBgColor !== self::STYLE_NONE ) {
-                $this->write( "\e[{$this->currentBgColor}m" );
-            }
-        }
-
-        public function setFontFeature( int $style ): Console {
-            $this->currentFontStyle = $style;
-            $this->setOutputStyling();
-            return $this;
-        }
-
-        public function setBackgroundColor( int $color ): Console {
-            $this->currentBgColor = $color + 10;
-            $this->setOutputStyling();
-            return $this;
-        }
-
-        public function setForegroundColor( int $color ): Console {
-            $this->currentFgColor = $color;
-            $this->setOutputStyling();
-            return $this;
-        }
-
-        public function cls(): Console {
-            $this->write( "\e[2J" );
-            return $this;
-        }
-
-        public function up( int $amount = 1 ): Console {
-            $this->write( "\e[{$amount}A" );
-            return $this;
-        }
-
-        public function down( int $amount = 1 ): Console {
-            $this->write( "\e[{$amount}B" );
-            return $this;
-        }
-
-        public function right( int $amount = 1 ): Console {
-            $this->write( "\e[{$amount}C" );
-            return $this;
-        }
-
-        public function left( int $amount = 1 ): Console {
-            $this->write( "\e[{$amount}D" );
-            return $this;
-        }
-
-        /**
-         * stores cursor position
-         * @return \Wrapped\_\Cli\Console
-         */
-        public function push(): Console {
-            $this->write( "\e[s" );
-            return $this;
-        }
-
-        /**
-         * restores cursor position
-         * @return \Wrapped\_\Cli\Console
-         */
-        public function pop(): Console {
-            $this->write( "\e[u" );
-            return $this;
-        }
-
-        public function jump( int $x = 0, int $y = 0 ): Console {
-            $this->write( "\e[{$y};{$x}f" );
-            return $this;
-        }
-
-        /**
-         * reset all style features
-         */
-        public function __destruct() {
-            if ( $this->currentFgColor !== self::STYLE_NONE || $this->currentBgColor !== self::STYLE_NONE ) {
-                $this->write( "\e[0m" );
-            }
-        }
-
-        public function getWidth(): ?int {
-
-            if ( $this->dimensions === null ) {
-                $this->updateDimensions();
-            }
-
-            return $this->dimensions[0] ?? null;
-        }
-
-        public function getHeight(): ?int {
-
-            if ( $this->dimensions === null ) {
-                $this->updateDimensions();
-            }
-
-            return $this->dimensions[1] ?? null;
-        }
-
-        public function updateDimensions(): bool {
-
-            $descriptorspec = [
-                1 => [ 'pipe', 'w' ],
-                2 => [ 'pipe', 'w' ],
-            ];
-
-            $process = proc_open( 'stty -a | grep columns', $descriptorspec, $pipes, null, null, [ 'suppress_errors' => true ] );
-
-            if ( is_resource( $process ) ) {
-                $info = stream_get_contents( $pipes[1] );
-                fclose( $pipes[1] );
-                fclose( $pipes[2] );
-                proc_close( $process );
-            } else {
-                return false;
-            }
-
-            if ( preg_match( '/rows.(\d+);.columns.(\d+);/i', $info, $matches ) ) {
-                // extract [w, h] from "rows h; columns w;"
-                $this->dimensions[0] = (int) $matches[2];
-                $this->dimensions[1] = (int) $matches[1];
-            } elseif ( preg_match( '/;.(\d+).rows;.(\d+).columns/i', $info, $matches ) ) {
-                // extract [w, h] from "; h rows; w columns"
-                $this->dimensions[0] = (int) $matches[2];
-                $this->dimensions[1] = (int) $matches[1];
-            } else {
-                return false;
-            }
-
-            return true;
-        }
-
-        public function forceColorOutput( $bool = true ) {
-            $this->forceColor = $bool;
-            return $this;
-        }
-
-        public function supportsColor(): bool {
-
-            if ( $this->forceColor ) {
-                return true;
-            }
-
-            if ( !$this->inTerminal ) {
-                return false;
-            }
-
-            $descriptorspec = [
-                1 => [ 'pipe', 'w' ],
-                2 => [ 'pipe', 'w' ],
-            ];
-
-            $process = proc_open( 'tput colors', $descriptorspec, $pipes, null, null, [ 'suppress_errors' => true ] );
-
-            if ( is_resource( $process ) ) {
-                $info = stream_get_contents( $pipes[1] );
-                fclose( $pipes[1] );
-                fclose( $pipes[2] );
-                proc_close( $process );
-            } else {
-                return false;
-            }
-
-            return (int) $info > 1;
-        }
-
-    }
-    
-
-        class ParameterBag
-        implements Countable, IteratorAggregate {
-
-            private $parameters = [], $raw = null;
-
-            public function __construct( array $parameters ) {
-                $this->parameters = $parameters;
-            }
-
-            public function count() {
-                return count( $this->parameters );
-            }
-
-            /**
-             *
-             * @return ArrayIterator
-             */
-            public function getIterator() {
-                return new ArrayIterator( $this->parameters );
-            }
-
-            public function hasNot( $param ): bool {
-                return !$this->has( $param );
-            }
-
-            public function has( $key ): bool {
-
-                if ( !is_array( $key ) ) {
-                    return isset( $this->parameters[$key] );
-                }
-
-                foreach ( $key as $name ) {
-                    if ( !isset( $this->parameters[$name] ) ) {
-                        return false;
-                    }
-                }
-
-                return true;
-            }
-
-            public function get( string $key, $default = null ) {
-
-                if ( !$this->has( $key ) ) {
-                    return $default;
-                }
-
-                return $this->parameters[$key];
-            }
-
-            public function is( $key, $value ) {
-                return $this->get( $key ) == $value;
-            }
-
-            public function isNot( $key, $value ) {
-                return $this->get( $key ) != $value;
-            }
-
-            public function all() {
-                return $this->parameters;
-            }
-
-            public function first() {
-                reset( $this->parameters );
-                return current( $this->parameters );
-            }
-
-            public function last() {
-                end( $this->parameters );
-                return current( $this->parameters );
-            }
-
-            public function except( array $filter = [] ) {
-
-                $return = [];
-
-                foreach ( $this->all() as $key => $value ) {
-                    if ( !in_array( $key, $filter ) ) {
-                        $return[$key] = $value;
-                    }
-                }
-
-                return $return;
-            }
-
-            /**
-             * overrides key in the given bag
-             * @param type $key
-             * @param type $value
-             * @return ParameterBag
-             */
-            public function override( $key, $value ) {
-                $this->parameters[$key] = $value;
-                return $this;
-            }
-
-            public function setRawData( $content ): ParameterBag {
-                $this->raw = $content;
-                return $this;
-            }
-
-            public function getRawData() {
-                return $this->raw;
-            }
-
-        }
-    
-    class KeyInput {
-      
-        protected $registeredKeys = [];
-        public $lastKey = null;
-      
-        public function registerKey( string $key, ... $callbacks ): KeyInput {
-            
-            foreach( $callbacks as $callback ) {
-                $this->registeredKeys[$key][] = $callback;
-            }
-            
-            return $this;
-        }
-      
-        public function consume( $stream ) {
-          
-            $keybuffer = [];
-            $key = null;
-            
-            for( $i = 0; $i < 6; $i++) {
-              $keybuffer[$i] = ord(fgetc($stream));
-            }
-            
-            if ( !$keybuffer[0] ) {
-              return;
-            }
-            
-            // normal keys with ?!<> etc.
-            if ( $keybuffer[0] >= 33 && $keybuffer[0] <= 125 ) {
-              
-              $key = chr($keybuffer[0]);
-              
-            // alt alfa-num
-            } elseif ( 
-                 $keybuffer[0] == 27 
-              && $keybuffer[1] >= 48 && $keybuffer[1] <= 122
-              && $keybuffer[2] == null
-            ) {
-              
-              $key = 'alt-' . chr( $keybuffer[1]);
-            } elseif( 
-                   in_array( $keybuffer[0], [ 13, 127, 32 ] )
-                && $keybuffer[1] == null
-            ) {
-              
-              switch( $keybuffer[0] ) {
-                case 13: $key = 'enter'; break;
-                case 32: $key = 'space'; break;
-                case 127: $key = 'bcksp'; break;
-              }
-              
-              
-            // f1-f4
-            } elseif (
-                 $keybuffer[0] == 27 
-              && $keybuffer[1] == 79
-              && $keybuffer[2] >= 80 && $keybuffer[2] <= 84
-              && $keybuffer[3] == null 
-            ) {
-                switch( $keybuffer[2] ) {
-                  case 80: $key = 'F1'; break;
-                  case 81: $key = 'F2'; break;
-                  case 82: $key = 'F3'; break;
-                  case 83: $key = 'F4'; break;
-                }
-
-            // f5-f8
-            } elseif (
-                 $keybuffer[0] == 27 
-              && $keybuffer[1] == 91
-              && $keybuffer[2] == 49
-              && in_array( $keybuffer[3], [53,55,56,57] )
-              && $keybuffer[4] == 126
-              && $keybuffer[5] == null
-            ) {
-                switch( $keybuffer[3] ) {
-                  case 53: $key = 'F5'; break;
-                  case 55: $key = 'F6'; break;
-                  case 56: $key = 'F7'; break;
-                  case 57: $key = 'F8'; break;
-                }
-                
-            // f9-f12
-            } elseif (
-                 $keybuffer[0] == 27 
-              && $keybuffer[1] == 91
-              && $keybuffer[2] == 50
-              && in_array( $keybuffer[3], [48,49,51,52] )
-              && $keybuffer[4] == 126
-              && $keybuffer[5] == null
-            ) {
-                switch( $keybuffer[3] ) {
-                  case 48: $key = 'F9'; break;
-                  case 49: $key = 'F10'; break;
-                  case 51: $key = 'F11'; break;
-                  case 52: $key = 'F12'; break;
-                }
-            
-            // navigation
-            } elseif (
-                 $keybuffer[0] == 27 
-              && $keybuffer[1] == 91
-              && ( $keybuffer[2] >= 65 && $keybuffer[2] <= 68 || $keybuffer[2] == 72 || $keybuffer[2] == 80  )
-              && $keybuffer[3] == null 
-            ) {
-                switch( $keybuffer[2] ) {
-                  case 65: $key = 'up'; break;
-                  case 66: $key = 'down'; break;
-                  case 67: $key = 'right'; break;
-                  case 68: $key = 'left'; break;
-                  case 72: $key = 'pos1'; break;
-                  case 80: $key = 'del'; break;
-                }
-            // navigation2
-            } elseif (
-                 $keybuffer[0] == 27 
-              && $keybuffer[1] == 91
-              && $keybuffer[2] >= 52 && $keybuffer[2] <= 54
-              && $keybuffer[3] == 126 
-              && $keybuffer[4] == null 
-            ) {
-                switch( $keybuffer[2] ) {
-                  case 52: $key = 'end'; break;
-                  case 53: $key = 'pgup'; break;
-                  case 54: $key = 'pgdown'; break;
-                }
-            }
-            
-            if ( $key === null )  {
-              return false;
-            }
-            
-            $hadCallback = false;
-            $this->lastKey = $key;
-             
-            if ( isset( $this->registeredKeys[ $key ] ) ) {
-                foreach( $this->registeredKeys[ $key ] as $callback ) {
-                    $callback();
-                    $hadCallback = true;
-                }
-            }
-            
-            return $hadCallback;
-        }
-    }
-    
-    class Debugger {
-      
-        private $pg;
-        
-        public $stack  = [];
-        public $vars   = [];
-        public $source = [];
-        public $breakpoints = [];
-        
-        private $channel = null;
-        
-        private $async_result;
-        
-        private $initialized = false;
-        private $attached    = false;
-        public $currentFrame = null;
-      
-        public function setConnectionHandle( $pg ) {
-            $this->pg = $pg;
-            return $this;
-        }
-        
-        public function isInitialized(): bool {
-          return $this->initialized;
-        }
-        
-        public function isAttached(): bool {
-          return $this->attached;
-        }
-        
-        public function init() {
-          
-            // setup channel
-            
-            $this->channel = pg_fetch_assoc(pg_query('select pldbg_create_listener()'))['pldbg_create_listener'];
-            
-            // oid hardcoded to given functions
-            $this->addGlobalBreakPoint( 44566 );
-        }
-        
-        public function incrementStackFrame() {
-            if ( $this->currentFrame === null || $this->currentFrame + 1 >= count( $this->stack ) ) {
-              // nope
-              return;
-            }
-            
-            $this->currentFrame++;
-            pg_query("select pldbg_select_frame({$this->channel},{$this->currentFrame})");
-        }
-        
-        public function decrementStackFrame() {
-          
-            if ( $this->currentFrame === null || $this->currentFrame - 1 < 0 ) {
-              // nope
-              return;
-            }
-            
-            $this->currentFrame--;
-            pg_query("select pldbg_select_frame({$this->channel},{$this->currentFrame})");
-        }
-        
-        public function stepInto() {
-            pg_query("select pldbg_step_into({$this->channel})");
-        }
-        
-        public function stepOver() {
-            pg_query("select pldbg_step_over({$this->channel})");
-        }
-
-        public function continue() {
-            pg_query("select pldbg_continue({$this->channel})");
-        }
-        public function abort() {
-            pg_query("select pldbg_abort_target({$this->channel})");
-        }
-        
-        public function updateSource() {
-            $this->source = explode("\n",pg_fetch_assoc(pg_query("select pldbg_get_source as src  from pldbg_get_source({$this->channel}," . $this->stack[$this->currentFrame]['func'] . ")"))['src']);
-        }
-        
-        public function updateStack() {
-            $this->stack = pg_fetch_all(pg_query("select * from pldbg_get_stack({$this->channel})")) ?? [];
-            $this->currentFrame = 0;
-        }
-        
-        public function updateVars() {
-            $this->vars   = pg_fetch_all(pg_query("select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$this->channel})")) ?? [];
-        }
-        
-        public function updateBreakpoints() {
-            $this->breakpoints   = pg_fetch_all(pg_query("select * from pldbg_get_breakpoints({$this->channel})"));
-        }
-        
-        public function addGlobalBreakPoint( int $oid , int $line = null ) {
-            pg_query("select pldbg_set_global_breakpoint({$this->channel},{$oid},null,null)");
-        }
-        
-        public function waitForConnection() {
-            $this->async_result = pg_send_query($this->pg, "select pldbg_wait_for_target({$this->channel})");
-        }
-        
-        public function checkForConnection() {
-          
-            if ( pg_connection_busy( $this->pg ) ) {
-                return false;
-            }
-            
-            // clear results from connection
-            pg_get_result( $this->pg );
-            
-            $this->attached = true;
-            return true;
-        }
-        
-        public function refresh() {
-          $this->updateStack();
-          $this->updateSource();
-          $this->updateVars();
-          $this->updateBreakpoints();
-        }
-    }
-    
-    class ConsoleFrame {
-      
-        private $cli;
-        
-        private $pos, $height, $width, $border = false, $buffer = [];
-        
-        public function __construct( Console $cli ) {
-            $this->cli = $cli;
-            
-            $this->height = $cli->getHeight();
-            $this->width = $cli->getWidth();
-        }
-        
-        public function setPosition( $x, $y ) {
-            $this->pos = [
-              'x' => $x,
-              'y' => $y,
-            ];
-            
-            return $this;
-        }
-        
-        public function setDimension( $width, $height ) {
-          
-            $this->width = $width;
-            $this->height = $height;
-            
-            return $this;
-        }
-        
-        // wipes rectangle with spaces
-        private function blank() {
-            
-            for( 
-                $h = 0; 
-                   $h <= $this->height 
-                && $h < ($this->cli->getHeight() - $this->pos['y']);
-                $h++ 
-            ) {
-              
-              // if window overflows the window with limit blanking width
-              // to stay within borders
-              if ( $this->cli->getWidth() < $this->pos['x'] + $this->width ) {
-                $blankWidth = $this->cli->getWidth() - $this->pos['x'];
-              } else {
-                $blankWidth = $this->width;
-              }
-              
-              $this->cli->jump( $this->pos['x'], $this->pos['y'] + $h );  
-              $this->cli->write( str_repeat(" ", $blankWidth ) );
-            }
-        }
-        
-        public function addToBuffer( $line, $style = null ) {
-            $this->buffer[] = [ $line, $style ];
-            return $this;
-        }
-        
-        public function clearBuffer() {
-          $this->buffer = [];
-          return $this;
-        }
-        
-        public function render() {
-            
-            $this->blank();
-            
-            $offset = 0;
-            foreach( $this->buffer as [ $line, $style ] ) {
-              
-              $this->cli->jump( $this->pos['x'], $this->pos['y'] + $offset );
-              $this->cli->write( $line, $style );
-              $offset++;
-            }
-        }
-    }
 
     // hardcoded for now
     $connectionString = 'host=localhost port=6666 dbname=docker user=docker password=docker';
-    
+
+    // lazy ass autoloader
+    spl_autoload_register( function ( $class ) {
+
+        $possiblePaths = [
+            __DIR__ . "/_/" . str_replace( "\\", "/", $class ) . ".php", // app data
+        ];
+
+        foreach ( $possiblePaths as $path ) {
+            if ( file_exists( $path ) ) {
+                return require_once $path;
+            }
+        }
+    } );
+
     // setup application
     $earlyConsole = new Console();
     $earlyConsole->setPrefixCallback( function () {
         return "[" . (new DateTime )->format( "H:i:s.u" ) . "] ";
     });
-    
 
-    
     $earlyConsole->writeLn('setting up tty');
-    
+
     // todo
     // save old settings with
     // stty -g < /dev/tty
     // restore later with stty $old < /dev/tty
-    system('stty -echo cbreak min 1 time 0 < /dev/tty');
+    system('stty -echo -icanon min 1 time 0 < /dev/tty');
     $stdin = fopen('php://stdin', 'r');
     stream_set_blocking($stdin, 0);
 
+    $earlyConsole->writeLn('setting application');
 
-    $earlyConsole->writeLn('setting application');    
-    
     $targetFps = 30;
     $attached = false;
     $initialized = false;
-    
+
     $cli = new Console();
     $debugger = new Debugger();
     $input = new KeyInput();
-    
-    $earlyConsole->writeLn('connecting to database');    
-    
+
+    $earlyConsole->writeLn('connecting to database');
+
     $pg = \pg_connect( $connectionString );
     \pg_set_error_verbosity( $pg, \PGSQL_ERRORS_DEFAULT );
-    
+
     $debugger->setConnectionHandle( $pg );
 
-    $earlyConsole->writeLn('setting up shortcuts');    
-        
+    $earlyConsole->writeLn('setting up shortcuts');
+
     $input->registerKey('q', function () { exit; });
-    
+
     // for the stackframe we cannot use the convient function, because its resets the stack info
     $input->registerKey(
-        'F1', 
-        [$debugger,'decrementStackFrame'], [$debugger,'updateVars'], [$debugger,'updateSource'] 
+        'F1',
+        [$debugger,'decrementStackFrame'], [$debugger,'updateVars'], [$debugger,'updateSource']
     );
     $input->registerKey(
-        'F2', 
-        [$debugger,'incrementStackFrame'], [$debugger,'updateVars'], [$debugger,'updateSource']  
+        'F2',
+        [$debugger,'incrementStackFrame'], [$debugger,'updateVars'], [$debugger,'updateSource']
     );
-    
+
     // step into
     $input->registerKey('F4', [$debugger,'stepInto'], [$debugger,'refresh']  );
-    
+
     // step over
     $input->registerKey('F5', [$debugger,'stepOver'], [$debugger,'refresh']  );
-    
+
     // step over
     $input->registerKey('F8', [$debugger,'continue'], [$debugger,'refresh']  );
-    
+
     $input->registerKey('F10', [$debugger,'abort'] );
-    
-    
-    $earlyConsole->writeLn('creating debug session');    
-    
-    $debugger->init();
-    $debugger->waitForConnection();
-    
-    $displayUpdate = false;
-    $forceRedraw = false;
-    
-    $earlyConsole->writeLn('registering resize handler');    
-    
 
+    // cursor
+    $input->registerKey('down', [$debugger,'nextLine'] );
+    $input->registerKey('up', [$debugger,'previousLine'] );
 
-    $earlyConsole->writeLn('waiting for target');
-    
+    // readmode
+    $input->registerKey(':', function () use ($input) {
+        $input->readMode(function ( $buffer ) {
+
+            foreach( $buffer as $input ) {
+
+                switch ($input) {
+                    case 'space': echo ' '; break;
+                    default: echo $input;
+                }
+
+            }
+            die();
+            // die(implode('', $buffer));
+        });
+    });
+
+    $earlyConsole->writeLn('error handler');
+
     // lazy ass exception handling
     set_exception_handler( function ( $e ) {
-      
+
         (new Console())->cls();
 
         echo $e->getTraceAsString() . PHP_EOL . PHP_EOL . PHP_EOL;
@@ -846,9 +114,11 @@
         throw new ErrorException( $errstr, 0, $errno, $errfile, $errline );
     } );
 
+    $earlyConsole->writeLn('registering resize handler');
+
     $cli->updateDimensions();
     $cli->cls();
-    
+
     $sourceFrame = new ConsoleFrame( $cli );
     $sourceFrame->setPosition( 0, 2 );
     $sourceFrame->setDimension( $cli->getWidth() - 100 , $cli->getHeight() - 2 );
@@ -858,61 +128,68 @@
     $stackFrame->setDimension( $cli->getWidth() - 100 , $cli->getHeight() - 2 );
 
     pcntl_async_signals(true);
-    
+
     pcntl_signal(
         SIGWINCH,
         function () use ($cli, &$forceRedraw, $stackFrame, $sourceFrame): void {
             $cli->updateDimensions();
             $forceRedraw = true;
-            
+
             $sourceFrame->setDimension( $cli->getWidth() - 100 , $cli->getHeight() - 2 );
-            
+
             $stackFrame->setPosition( $cli->getWidth() - 100, 2 );
             $stackFrame->setDimension( $cli->getWidth() - 100 , $cli->getHeight() - 2 );
         }
     );
 
+
+    $debugger->init();
+    $debugger->waitForConnection();
+
+    $displayUpdate = false;
+    $forceRedraw = false;
+
     while( true ) {
 
         $start = microtime(1);
         $displayUpdate = $input->consume( $stdin );
-        
+
         // if not attached check for connection
         if ( !$debugger->isAttached() && $debugger->checkForConnection() ) {
             $displayUpdate = true;
-            
+
             $debugger->updateStack();
             $debugger->updateSource();
             $debugger->updateVars();
         }
-        
+
         if ( !$debugger->isAttached() ) {
           $cli->jump(0,0);
-          $cli->write( 'waiting');  
+          $cli->write( 'waiting');
         }
-        
-        
+
+
         if ( $displayUpdate || $forceRedraw ) {
-          
+
             $forceRedraw = false;
-          
+
             $cli->cls();
-          
+
             $result = $debugger->stack[ $debugger->currentFrame ] ?? [];
             $source = $debugger->source;
             $vars = $debugger->vars;
-            
+
 
             if ( $source ) {
-              
+
               // sourcecode
               $sourceFrame->clearBuffer();
-              $sourceFrame->addToBuffer( 
-                  str_repeat(' ', 7) . $debugger->stack[ $debugger->currentFrame ]['targetname'], 
+              $sourceFrame->addToBuffer(
+                  str_repeat(' ', 7) . $debugger->stack[ $debugger->currentFrame ]['targetname'],
                   Console::STYLE_BOLD
               );
               $sourceFrame->addToBuffer('');
-              
+
               for ( $line = 0; $line < count( $source ); $line++ ) {
 
                   $sourceFrame->addToBuffer(
@@ -920,24 +197,24 @@
                       ( $line + 1 ) == $result['linenumber'] ? Console::STYLE_BLUE : Console::STYLE_NONE
                   );
               }
-              
+
               $sourceFrame->render();
-              
+
               // stack
               $stackFrame->clearBuffer();
-              
+
               foreach( $debugger->stack  as $l ) {
-                
+
                 $text = "{$l['level']} » {$l['targetname']}:{$l['func']} » {$l['args']}";
-                $stackFrame->addToBuffer( 
-                    $text , 
-                    ($l['level'] == $debugger->currentFrame ) ? Console::STYLE_BLUE : Console::STYLE_NONE 
+                $stackFrame->addToBuffer(
+                    $text ,
+                    ($l['level'] == $debugger->currentFrame ) ? Console::STYLE_BLUE : Console::STYLE_NONE
                 );
               }
-              
+
               $stackFrame->addToBuffer('');
               $stackFrame->addToBuffer('');
-              
+
               // vars
               $stackFrame->addToBuffer(
                   str_pad ( 'name', 20)  .
@@ -950,11 +227,11 @@
                   str_pad ( 'N', 3 ),
                   Console::STYLE_BOLD
               );
-              
+
               foreach( $vars as $var ) {
-                    
+
                 $stackFrame->addToBuffer(
-                    
+
                     str_pad ( $var['name'], 20)  .
                     str_pad ( $var['value'], 30)  .
                     str_pad ( $var['dtype'], 30)  .
@@ -965,18 +242,16 @@
                     str_pad ( $var['isnotnull'], 3 )
                 );
               }
-              
+
               $stackFrame->render();
             }
         }
 
-
-
         $frametime = ( microtime(1) - $start ) * 1000 ;
 
         if ( ( 1 / $targetFps * 1000 ) > $frametime ) {
-            usleep( 
-                ( 
+            usleep(
+                (
                     1 / $targetFps * 1000 // frames per ms
                   - $frametime
                 ) * 1000  // µs
@@ -984,6 +259,10 @@
         }
 
         $frametime = ( microtime(1) - $start ) * 1000 ;
+
+
+        $cli->jump( 0 ,$cli->getHeight() );
+        $cli->write( implode('',$input->readBuffer));
 
         $cli->jump( $cli->getWidth() - strlen('[pgdown] fps: 30.00') ,$cli->getHeight() );
         $cli->write( str_pad("[{$input->lastKey}]",8) .  '  fps: '. number_format( (1 / $frametime)*1000 , 2 ) );
