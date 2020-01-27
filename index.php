@@ -41,6 +41,7 @@
     $initialized = false;
 
     $cli      = new Console();
+    $cli->wrap(false);
     $debugger = new Debugger();
     $input    = new KeyInput();
 
@@ -121,7 +122,7 @@
     $sourceFrame->setDimension( $cli->getWidth() - 104, $cli->getHeight() - 2 );
 
     $stackFrame = new ConsoleFrame( $cli );
-    $stackFrame->setPosition( $cli->getWidth() - 100, 2 );
+    $stackFrame->setPosition( $cli->getWidth() - 105, 2 );
     $stackFrame->setDimension( 105 , $cli->getHeight() - 2 );
 
     pcntl_async_signals( true );
@@ -137,7 +138,7 @@
             $sourceFrame->setPosition( 0, 2 );
             $sourceFrame->setDimension( $cli->getWidth() - 104, $cli->getHeight() - 2 );
 
-            $stackFrame->setPosition( $cli->getWidth() - 100, 2 );
+            $stackFrame->setPosition( $cli->getWidth() - 105, 2 );
             $stackFrame->setDimension( 105, $cli->getHeight() - 2 );
 
             $cli->cls();
@@ -298,7 +299,7 @@
                     str_pad( 'line', 6 ) .
                     str_pad( 'U', 3 ) .
                     str_pad( 'C', 3 ) .
-                    str_pad( 'N', 3 ),
+                    str_pad( 'N', 1 ),
                     Console::STYLE_BOLD
                 );
 
@@ -312,7 +313,7 @@
                         str_pad( $var['linenumber'], 6 ) .
                         str_pad( $var['isunique'], 3 ) .
                         str_pad( $var['isconst'], 3 ) .
-                        str_pad( $var['isnotnull'], 3 )
+                        str_pad( $var['isnotnull'], 1 )
                     );
                 }
 
@@ -350,9 +351,9 @@
         $frametime = ( microtime( 1 ) - $start ) * 1000;
 
 
-        $cli->jump( 0, $cli->getHeight() );
+        $cli->jump( 0, $cli->getHeight() - 2 );
         $cli->write( implode( '', $input->readBuffer ) );
 
-        $cli->jump( $cli->getWidth() - strlen( '[pgdown] fps: 30.00' ), $cli->getHeight() );
+        $cli->jump( $cli->getWidth() - strlen( '[pgdown] fps: 30.00' ), $cli->getHeight()  );
         $cli->write( str_pad( "[{$input->lastKey}]", 8 ) . '  fps: ' . number_format( (1 / $frametime) * 1000, 2 ) );
     }

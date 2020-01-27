@@ -11,6 +11,7 @@
         const STYLE_PURPLE    = 35;
         const STYLE_CYAN      = 36;
         const STYLE_WHITE     = 37;
+
         const STYLE_REGULAR   = "0";
         const STYLE_BOLD      = "1";
         const STYLE_UNDERLINE = "4";
@@ -81,12 +82,23 @@
                 $this->setForegroundColor( $color );
             }
 
+            if ( $this->currentFontStyle || $this->currentBgColor || $this->currentFgColor ) {
+
+                // set current color
+                fwrite( $this->selectedStream, "\033[{$this->currentFgColor}m" );
+            }
+
             if ( $this->linePrefixFunc !== null && $this->hadLineOutput !== true ) {
                 fwrite( $this->selectedStream, ($this->linePrefixFunc)() );
                 $this->hadLineOutput = true;
             }
 
             fwrite( $this->selectedStream, $text );
+
+            // clear color output again
+            if ( $this->currentFontStyle || $this->currentBgColor || $this->currentFgColor ) {
+                fwrite( $this->selectedStream, "\033[0m" );
+            }
 
             if ( $color !== null ) {
                 $this->setForegroundColor( static::STYLE_NONE );
@@ -100,7 +112,7 @@
         }
 
         public function cr(): Console {
-            $this->write( "\r" );
+            fwrite( $this->selectedStream, "\r" );
             return $this;
         }
 
@@ -122,64 +134,71 @@
             return fgets( STDIN );
         }
 
-        protected function setOutputStyling() {
-
-            if ( $this->colorSupported === null ) {
-                $this->colorSupported = $this->supportsColor();
-            }
-
-            if ( !$this->colorSupported ) {
-                return;
-            }
-
-            $this->write( "\033[{$this->currentFontStyle};{$this->currentFgColor}m" );
-
-            if ( $this->currentBgColor !== self::STYLE_NONE ) {
-                $this->write( "\033[{$this->currentBgColor}m" );
-            }
-        }
-
         public function setFontFeature( int $style ): Console {
             $this->currentFontStyle = $style;
-            $this->setOutputStyling();
             return $this;
         }
 
         public function setBackgroundColor( int $color ): Console {
             $this->currentBgColor = $color + 10;
-            $this->setOutputStyling();
             return $this;
         }
 
         public function setForegroundColor( int $color ): Console {
             $this->currentFgColor = $color;
-            $this->setOutputStyling();
             return $this;
         }
 
         public function cls(): Console {
-            $this->write( "\033[2J" );
+            fwrite( $this->selectedStream, "\033[2J" );
             return $this;
         }
 
         public function up( int $amount = 1 ): Console {
-            $this->write( "\033[{$amount}A" );
+            fwrite( $this->selectedStream, "\033[{$amount}A" );
             return $this;
         }
 
         public function down( int $amount = 1 ): Console {
-            $this->write( "\033[{$amount}B" );
+            fwrite( $this->selectedStream, "\033[{$amount}B" );
             return $this;
         }
 
         public function right( int $amount = 1 ): Console {
-            $this->write( "\033[{$amount}C" );
+            fwrite( $this->selectedStream, "\033[{$amount}C" );
             return $this;
         }
 
         public function left( int $amount = 1 ): Console {
-            $this->write( "\033[{$amount}D" );
+            fwrite( $this->selectedStream, "\033[{$amount}D" );
             return $this;
+        }
+
+        /**
+         * Hides the cursor
+         */
+        public function hide() {
+            fwrite( $this->selectedStream, "\033[?25l" );
+        }
+
+        /**
+         * Enable/Disable Auto-Wrap
+         *
+         * @param bool $wrap
+         */
+        public function wrap( $wrap = true ) {
+            if ( $wrap ) {
+                fwrite( $this->selectedStream, "\033[?7h" );
+            } else {
+                fwrite( $this->selectedStream, "\033[?7l" );
+            }
+        }
+
+        /**
+         * Shows the cursor
+         */
+        public function show() {
+            fwrite( $this->selectedStream, "\033[?25h\033[?0c" );
         }
 
         /**
@@ -187,7 +206,7 @@
          * @return \Wrapped\_\Cli\Console
          */
         public function push(): Console {
-            $this->write( "\033[s" );
+            fwrite( $this->selectedStream, "\033[s" );
             return $this;
         }
 
@@ -196,12 +215,12 @@
          * @return \Wrapped\_\Cli\Console
          */
         public function pop(): Console {
-            $this->write( "\033[u" );
+            fwrite( $this->selectedStream, "\033[u" );
             return $this;
         }
 
         public function jump( int $x = 0, int $y = 0 ): Console {
-            $this->write( "\033[{$y};{$x}H" );
+            fwrite( $this->selectedStream, "\033[{$y};{$x}H" );
             return $this;
         }
 
@@ -210,7 +229,7 @@
          */
         public function __destruct() {
             if ( $this->currentFgColor !== self::STYLE_NONE || $this->currentBgColor !== self::STYLE_NONE ) {
-                $this->write( "\033[0m" );
+                fwrite( $this->selectedStream, "\033[0m" );
             }
         }
 
@@ -234,8 +253,8 @@
 
         public function updateDimensions(): bool {
 
-            $this->dimensions[0] = (int) system('tput cols');
-            $this->dimensions[1] = (int) system('tput rows');
+            $this->dimensions[0] = (int) shell_exec( 'tput cols' );
+            $this->dimensions[1] = (int) shell_exec( 'tput lines' );
 
             return true;
         }
@@ -246,7 +265,7 @@
         }
 
         public function supportsColor(): bool {
-            return ((int) system('tput colors')) > 1;
+            return ((int) shell_exec( 'tput colors' )) > 1;
         }
 
     }
