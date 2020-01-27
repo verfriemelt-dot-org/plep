@@ -29,9 +29,10 @@
     // save old settings with
     // stty -g < /dev/tty
     // restore later with stty $old < /dev/tty
-    system( 'stty -echo -icanon min 1 time 0 < /dev/tty' );
+    system( 'stty -echo -icanon min 1 time 0' );
     $stdin = fopen( 'php://stdin', 'r' );
     stream_set_blocking( $stdin, 0 );
+
 
     $earlyConsole->writeLn( 'setting application' );
 
@@ -117,24 +118,29 @@
 
     $sourceFrame = new ConsoleFrame( $cli );
     $sourceFrame->setPosition( 0, 2 );
-    $sourceFrame->setDimension( $cli->getWidth() - 100, $cli->getHeight() - 2 );
+    $sourceFrame->setDimension( $cli->getWidth() - 104, $cli->getHeight() - 2 );
 
     $stackFrame = new ConsoleFrame( $cli );
     $stackFrame->setPosition( $cli->getWidth() - 100, 2 );
-    $stackFrame->setDimension( $cli->getWidth() - 100, $cli->getHeight() - 2 );
+    $stackFrame->setDimension( 105 , $cli->getHeight() - 2 );
 
     pcntl_async_signals( true );
 
     pcntl_signal(
         SIGWINCH,
         function () use ( $cli, &$forceRedraw, $stackFrame, $sourceFrame ): void {
-        $cli->updateDimensions();
-        $forceRedraw = true;
 
-        $sourceFrame->setDimension( $cli->getWidth() - 100, $cli->getHeight() - 2 );
 
-        $stackFrame->setPosition( $cli->getWidth() - 100, 2 );
-        $stackFrame->setDimension( $cli->getWidth() - 100, $cli->getHeight() - 2 );
+            $cli->updateDimensions();
+            $forceRedraw = true;
+
+            $sourceFrame->setPosition( 0, 2 );
+            $sourceFrame->setDimension( $cli->getWidth() - 104, $cli->getHeight() - 2 );
+
+            $stackFrame->setPosition( $cli->getWidth() - 100, 2 );
+            $stackFrame->setDimension( 105, $cli->getHeight() - 2 );
+
+            $cli->cls();
     }
     );
 
@@ -145,7 +151,7 @@
     $functionListFiltered = $functionList;
 
 
-    $filterCallback = (function ( $buffer ) use ( &$functionListFiltered, &$functionList, $debugger ){
+    $filterCallback = (function ( $buffer ) use ( &$functionListFiltered, &$functionList, $debugger, $cli ){
 
         $selectedFunction = array_shift($functionListFiltered);
 
@@ -156,6 +162,8 @@
         $debugger->setStartingBreakpoint(43290);
         $debugger->init();
         $debugger->waitForConnection();
+
+        $cli->cls();
     });
 
     // initialize debugger after main breakpoint
@@ -207,11 +215,12 @@
             // after keypress in readmode
             if ( $displayUpdate || $forceRedraw ) {
 
+
                 $textInput = implode( "", $input->readBuffer );
 
 
                 $cli->jump( 0, 0 );
-                $cli->write( str_pad('Function: ' . $textInput, 50), Console::STYLE_BOLD );
+                $cli->write( str_pad('Function: ' . $textInput, 15), Console::STYLE_BOLD );
 
                 $functionListFiltered = array_filter( $functionList, function ( $func ) use ( $textInput ) {
                     return preg_match( "~$textInput~", $func['name'] ) ;
@@ -232,6 +241,7 @@
 
 
         if ( $displayUpdate || $forceRedraw ) {
+
 
             $forceRedraw = false;
 
@@ -283,7 +293,7 @@
                 $stackFrame->addToBuffer(
                     str_pad( 'name', 20 ) .
                     str_pad( 'value', 30 ) .
-                    str_pad( 'dtype', 30 ) .
+                    str_pad( 'dtype', 35 ) .
                     str_pad( 'class', 6 ) .
                     str_pad( 'line', 6 ) .
                     str_pad( 'U', 3 ) .
@@ -297,7 +307,7 @@
                     $stackFrame->addToBuffer(
                         str_pad( $var['name'], 20 ) .
                         str_pad( $var['value'], 30 ) .
-                        str_pad( $var['dtype'], 30 ) .
+                        str_pad( $var['dtype'], 35 ) .
                         str_pad( $var['varclass'], 6 ) .
                         str_pad( $var['linenumber'], 6 ) .
                         str_pad( $var['isunique'], 3 ) .

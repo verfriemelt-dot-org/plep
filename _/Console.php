@@ -132,10 +132,10 @@
                 return;
             }
 
-            $this->write( "\e[{$this->currentFontStyle};{$this->currentFgColor}m" );
+            $this->write( "\033[{$this->currentFontStyle};{$this->currentFgColor}m" );
 
             if ( $this->currentBgColor !== self::STYLE_NONE ) {
-                $this->write( "\e[{$this->currentBgColor}m" );
+                $this->write( "\033[{$this->currentBgColor}m" );
             }
         }
 
@@ -158,27 +158,27 @@
         }
 
         public function cls(): Console {
-            $this->write( "\e[2J" );
+            $this->write( "\033[2J" );
             return $this;
         }
 
         public function up( int $amount = 1 ): Console {
-            $this->write( "\e[{$amount}A" );
+            $this->write( "\033[{$amount}A" );
             return $this;
         }
 
         public function down( int $amount = 1 ): Console {
-            $this->write( "\e[{$amount}B" );
+            $this->write( "\033[{$amount}B" );
             return $this;
         }
 
         public function right( int $amount = 1 ): Console {
-            $this->write( "\e[{$amount}C" );
+            $this->write( "\033[{$amount}C" );
             return $this;
         }
 
         public function left( int $amount = 1 ): Console {
-            $this->write( "\e[{$amount}D" );
+            $this->write( "\033[{$amount}D" );
             return $this;
         }
 
@@ -187,7 +187,7 @@
          * @return \Wrapped\_\Cli\Console
          */
         public function push(): Console {
-            $this->write( "\e[s" );
+            $this->write( "\033[s" );
             return $this;
         }
 
@@ -196,12 +196,12 @@
          * @return \Wrapped\_\Cli\Console
          */
         public function pop(): Console {
-            $this->write( "\e[u" );
+            $this->write( "\033[u" );
             return $this;
         }
 
         public function jump( int $x = 0, int $y = 0 ): Console {
-            $this->write( "\e[{$y};{$x}f" );
+            $this->write( "\033[{$y};{$x}H" );
             return $this;
         }
 
@@ -210,7 +210,7 @@
          */
         public function __destruct() {
             if ( $this->currentFgColor !== self::STYLE_NONE || $this->currentBgColor !== self::STYLE_NONE ) {
-                $this->write( "\e[0m" );
+                $this->write( "\033[0m" );
             }
         }
 
@@ -234,33 +234,8 @@
 
         public function updateDimensions(): bool {
 
-            $descriptorspec = [
-                1 => [ 'pipe', 'w' ],
-                2 => [ 'pipe', 'w' ],
-            ];
-
-            $process = proc_open( 'stty -a | grep columns', $descriptorspec, $pipes, null, null, [ 'suppress_errors' => true ] );
-
-            if ( is_resource( $process ) ) {
-                $info = stream_get_contents( $pipes[1] );
-                fclose( $pipes[1] );
-                fclose( $pipes[2] );
-                proc_close( $process );
-            } else {
-                return false;
-            }
-
-            if ( preg_match( '/rows.(\d+);.columns.(\d+);/i', $info, $matches ) ) {
-                // extract [w, h] from "rows h; columns w;"
-                $this->dimensions[0] = (int) $matches[2];
-                $this->dimensions[1] = (int) $matches[1];
-            } elseif ( preg_match( '/;.(\d+).rows;.(\d+).columns/i', $info, $matches ) ) {
-                // extract [w, h] from "; h rows; w columns"
-                $this->dimensions[0] = (int) $matches[2];
-                $this->dimensions[1] = (int) $matches[1];
-            } else {
-                return false;
-            }
+            $this->dimensions[0] = (int) system('tput cols');
+            $this->dimensions[1] = (int) system('tput rows');
 
             return true;
         }
@@ -271,32 +246,7 @@
         }
 
         public function supportsColor(): bool {
-
-            if ( $this->forceColor ) {
-                return true;
-            }
-
-            if ( !$this->inTerminal ) {
-                return false;
-            }
-
-            $descriptorspec = [
-                1 => [ 'pipe', 'w' ],
-                2 => [ 'pipe', 'w' ],
-            ];
-
-            $process = proc_open( 'tput colors', $descriptorspec, $pipes, null, null, [ 'suppress_errors' => true ] );
-
-            if ( is_resource( $process ) ) {
-                $info = stream_get_contents( $pipes[1] );
-                fclose( $pipes[1] );
-                fclose( $pipes[2] );
-                proc_close( $process );
-            } else {
-                return false;
-            }
-
-            return (int) $info > 1;
+            return ((int) system('tput colors')) > 1;
         }
 
     }

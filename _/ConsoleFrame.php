@@ -6,11 +6,18 @@
         private $pos, $height, $width, $border = false, $buffer = [];
         private $scrollPos = 0;
 
+        private static $instanceCount = 0;
+        private $instance;
+
+
         public function __construct( Console $cli ) {
+
             $this->cli = $cli;
 
             $this->height = $cli->getHeight();
             $this->width  = $cli->getWidth();
+
+            $this->instance = ++static::$instanceCount;
         }
 
         public function setPosition( $x, $y ) {
@@ -43,7 +50,7 @@
         // to stay within borders
         private function getRenderWidth(): int {
 
-            if ( $this->cli->getWidth() < $this->pos['x'] + $this->width ) {
+            if ( $this->cli->getWidth() -  $this->pos['x'] <= $this->width ) {
                 return $this->cli->getWidth() - $this->pos['x'];
             }
 
@@ -89,16 +96,27 @@
 
             $offset = 0;
 
-            foreach ( array_slice( $this->buffer, $this->scrollPos ) as [$line, $style] ) {
+            foreach ( array_slice( $this->buffer, $this->scrollPos , $this->getRenderHeight() ) as [$line, $style] ) {
+
+
+                $this->cli->jump( $this->pos['x'], $this->pos['y'] + $offset  );
+//                $this->cli->write( mb_substr( $line, 0,  $this->getRenderWidth() ), $style );
+
+                $line = str_replace( [ "\n", "\r", "\t", "\0" ], [ '', '', '', '' ], $line );
+
+                $this->cli->write(
+
+//                    str_pad( $this->getRenderHeight() . ":". $offset  ,6 ).
+
+//                    str_pad(
+                        substr( $line, 0,  $this->getRenderWidth() )
+//                        $this->getRenderWidth(),
+//                        $this->instance
+//                    ),
+                    , $style
+                    );
 
                 $offset++;
-                $this->cli->jump( $this->pos['x'], $this->pos['y'] + $offset );
-                $this->cli->write( mb_substr( $line, 0, $this->getRenderWidth() ), $style );
-
-
-                if ( $offset > $this->getRenderHeight() ) {
-                    break;
-                }
             }
         }
 
