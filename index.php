@@ -75,7 +75,7 @@
     // step over
     $input->registerKey( 'F8', [ $debugger, 'continue' ], [ $debugger, 'refresh' ] );
 
-    $input->registerKey( 'F10', [ $debugger, 'abort' ] );
+
 
     // cursor
     $input->registerKey( 'down', [ $debugger, 'nextLine' ] );
@@ -143,13 +143,41 @@
     );
 
 
-//    $debugger->init();
-//    $debugger->waitForConnection();
+    $displayUpdate        = false;
+    $forceRedraw          = true;
+    $functionList         = $debugger->fetchFunctions();
+    $functionListFiltered = $functionList;
 
-    $displayUpdate = false;
-    $forceRedraw   = false;
 
-    $functionList = $debugger->fetchFunctions();
+    $filterCallback = (function ( $buffer ) use ( &$functionListFiltered, &$functionList, $debugger ){
+
+        $selectedFunction = array_shift($functionListFiltered);
+
+        // reset filter
+        $functionListFiltered = $functionList;
+
+//        $debugger->setStartingBreakpoint( $selectedFunction['oid'] );
+        $debugger->setStartingBreakpoint(43290);
+        $debugger->init();
+        $debugger->waitForConnection();
+    });
+
+    // initialize debugger after main breakpoint
+    $triggerReadMode = (function () use ( $input, $filterCallback ) {
+            $input->readMode( $filterCallback );
+        } );
+
+    // moved down for handling vars, this needs to be its own class
+        // terminate and go back to input list
+    $input->registerKey( 'F10',
+        [$debugger, 'abort'],
+        [$debugger, 'reset'],
+        [$cli, 'cls'],
+        $triggerReadMode
+    );
+
+    $triggerReadMode();
+
 
     while ( true ) {
 
@@ -161,10 +189,6 @@
             // if not attached check for connection
             if ( !$debugger->isAttached() && $debugger->checkForConnection() ) {
                 $displayUpdate = true;
-
-                $debugger->updateStack();
-                $debugger->updateSource();
-                $debugger->updateVars();
             }
 
             if ( !$debugger->isAttached() ) {
@@ -173,26 +197,37 @@
             }
         } else {
 
-            // draw function picker
+
+            // after keypress in readmode
+            if ( $displayUpdate || $forceRedraw ) {
+
+                $textInput = implode( "", $input->readBuffer );
 
 
-            foreach( $functionList as $f ) {
-                $sourceFrame->addToBuffer("{$f['oid']} » {$f['schema']}.{$f['name']}({$f['args']})");
+                $cli->jump( 0, 0 );
+                $cli->write( str_pad('Function: ' . $textInput, 50), Console::STYLE_BOLD );
+
+                $functionListFiltered = array_filter( $functionList, function ( $func ) use ( $textInput ) {
+                    return preg_match( "~$textInput~", $func['name'] ) ;
+                } );
+
+                $sourceFrame->clearBuffer();
+
+                // draw function picker
+                foreach ( $functionListFiltered as $f ) {
+                    $sourceFrame->addToBuffer( "{$f['oid']} » {$f['schema']}.{$f['name']}({$f['args']})" );
+                }
+
+                $sourceFrame->render();
             }
-
-            $sourceFrame->render();
 
 
         }
 
 
-
-
         if ( $displayUpdate || $forceRedraw ) {
 
             $forceRedraw = false;
-
-            $cli->cls();
 
             $result = $debugger->stack[$debugger->currentFrame] ?? [];
             $source = $debugger->source;
@@ -222,6 +257,9 @@
                 // stack
                 $stackFrame->clearBuffer();
 
+                $stackFrame->addToBuffer( 'Frames', Console::STYLE_BOLD );
+                $stackFrame->addToBuffer( '' );
+
                 foreach ( $debugger->stack as $l ) {
 
                     $text = "{$l['level']} » {$l['targetname']}:{$l['func']} » {$l['args']}";
@@ -232,6 +270,7 @@
                 }
 
                 $stackFrame->addToBuffer( '' );
+                $stackFrame->addToBuffer('Variables', Console::STYLE_BOLD);
                 $stackFrame->addToBuffer( '' );
 
                 // vars
@@ -259,6 +298,22 @@
                         str_pad( $var['isconst'], 3 ) .
                         str_pad( $var['isnotnull'], 3 )
                     );
+                }
+
+                // breakpoints
+
+                $stackFrame->addToBuffer('');
+                $stackFrame->addToBuffer('Breakpoints', Console::STYLE_BOLD);
+                $stackFrame->addToBuffer( '' );
+
+                if ( !is_array($debugger->breakpoints)) {
+                    var_dump($debugger->breakpoints);
+                    die();
+                }
+
+
+                foreach( $debugger->breakpoints as $bp ) {
+                    $stackFrame->addToBuffer("{$bp['func']} » {$bp['linenumber']} » {$bp['targetname']}");
                 }
 
                 $stackFrame->render();

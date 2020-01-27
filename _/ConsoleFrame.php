@@ -77,7 +77,7 @@
 
             $this->blank();
 
-            $offset = 0;
+            $offset = 1;
 
             foreach ( $this->buffer as [$line, $style] ) {
 

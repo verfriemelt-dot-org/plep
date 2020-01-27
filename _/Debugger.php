@@ -1,3 +1,4 @@
+
 <?php
 
     class Debugger {
@@ -88,6 +89,12 @@
                 " ) );
         }
 
+        public function reset(): Debugger {
+            $this->initialized = false;
+            $this->attached = false;
+            return $this;
+        }
+
         public function init(): Debugger {
 
 
@@ -171,7 +178,13 @@
         }
 
         public function updateBreakpoints(): Debugger {
-            $this->breakpoints = pg_fetch_all( pg_query( "select * from pldbg_get_breakpoints({$this->channel})" ) );
+
+            $this->breakpoints = pg_fetch_all( pg_query( "select * from pldbg_get_breakpoints({$this->channel})" ) ) ?? [];
+
+            if ( $this->breakpoints === false ) {
+                $this->breakpoints = [];
+            }
+
             return $this;
         }
 
@@ -208,6 +221,8 @@
 
             // clear results from connection
             pg_get_result( $this->pg );
+
+            $this->refresh();
 
             $this->attached = true;
             return true;
