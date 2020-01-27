@@ -4,6 +4,7 @@
 
         private $cli;
         private $pos, $height, $width, $border = false, $buffer = [];
+        private $scrollPos = 0;
 
         public function __construct( Console $cli ) {
             $this->cli = $cli;
@@ -19,6 +20,15 @@
             ];
 
             return $this;
+        }
+
+        public function setScrollPos( int $pos ): ConsoleFrame {
+            $this->scrollPos = $pos;
+            return $this;
+        }
+
+        public function getScrollPos( ): int {
+            return $this->scrollPos;
         }
 
         public function setDimension( $width, $height ) {
@@ -77,13 +87,14 @@
 
             $this->blank();
 
-            $offset = 1;
+            $offset = 0;
 
-            foreach ( $this->buffer as [$line, $style] ) {
+            foreach ( array_slice( $this->buffer, $this->scrollPos ) as [$line, $style] ) {
 
+                $offset++;
                 $this->cli->jump( $this->pos['x'], $this->pos['y'] + $offset );
                 $this->cli->write( mb_substr( $line, 0, $this->getRenderWidth() ), $style );
-                $offset++;
+
 
                 if ( $offset > $this->getRenderHeight() ) {
                     break;

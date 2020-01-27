@@ -77,10 +77,6 @@
 
 
 
-    // cursor
-    $input->registerKey( 'down', [ $debugger, 'nextLine' ] );
-    $input->registerKey( 'up', [ $debugger, 'previousLine' ] );
-
     // readmode
     $input->registerKey( ':', function () use ( $input ) {
         $input->readMode( function ( $buffer ) {
@@ -177,6 +173,16 @@
     );
 
     $triggerReadMode();
+
+
+
+    // cursor
+    $input->registerKey( 'down', function () use ( $sourceFrame ) {
+        $sourceFrame->setScrollPos( $sourceFrame->getScrollPos() + 1);
+    } );
+    $input->registerKey( 'up', function () use ( $sourceFrame ) {
+        $sourceFrame->setScrollPos( $sourceFrame->getScrollPos() - 1);
+    } );
 
 
     while ( true ) {
