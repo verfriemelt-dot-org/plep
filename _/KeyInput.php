@@ -72,12 +72,15 @@
 
               $key = 'alt-' . chr( $keybuffer[1]);
             } elseif(
-                   in_array( $keybuffer[0], [ 10, 127, 32 ] )
+                   in_array( $keybuffer[0], [ 10, 13, 127, 32 ] )
                 && $keybuffer[1] == null
             ) {
 
               switch( $keybuffer[0] ) {
-                    case 10: $key = 'enter'; break;
+                                   
+                    case 10: 
+                    case 13: $key = 'enter'; break;
+                    
                     case 32: $key = 'space'; break;
                     case 127: $key = 'bcksp'; break;
               }

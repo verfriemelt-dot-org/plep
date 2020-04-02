@@ -86,6 +86,7 @@
                      join pg_namespace n on c.pronamespace = n.oid
                      join pg_language ln on c.prolang = ln.oid
                      where nspname <> 'pg_catalog' and lanname = 'plpgsql'
+                     order by length(proname) asc
                 " ) );
         }
 
@@ -174,6 +175,8 @@
 
         public function updateVars(): Debugger {
             $this->vars = pg_fetch_all( pg_query( "select *, pg_catalog.format_type(dtype, NULL) as dtype from pldbg_get_variables({$this->channel})" ) ) ?? [];
+            if ( !is_array($this->vars) ) { $this->vars = []; }
+
             return $this;
         }
 

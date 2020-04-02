@@ -159,8 +159,7 @@
         // reset filter
         $functionListFiltered = $functionList;
 
-//        $debugger->setStartingBreakpoint( $selectedFunction['oid'] );
-        $debugger->setStartingBreakpoint(43290);
+        $debugger->setStartingBreakpoint( $selectedFunction['oid'] );
         $debugger->init();
         $debugger->waitForConnection();
 
@@ -252,6 +251,10 @@
 
 
             if ( $source ) {
+
+                if ( isset($debugger->stack[$debugger->currentFrame]['linenumber']) && $debugger->stack[$debugger->currentFrame]['linenumber'] >= 10) {
+                   $sourceFrame->setScrollPos( $debugger->stack[$debugger->currentFrame]['linenumber'] - 10 );
+                }
 
                 // sourcecode
                 $sourceFrame->clearBuffer();
